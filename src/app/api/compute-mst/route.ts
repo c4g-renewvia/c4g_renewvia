@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
       ...result,
       receivedCosts, // for frontend confirmation/debug
     });
-  } catch (err: never) {
+  } catch (err: unknown) {
     console.error('API error:', err);
     return NextResponse.json(
       { error: err.message || 'Failed to run optimization' },

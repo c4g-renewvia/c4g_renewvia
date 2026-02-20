@@ -40,26 +40,36 @@ if __name__ == "__main__":
         for (i, j) in combinations(coords.index, 2):
             lat1, lon1 = coords.loc[i, ['Latitude', 'Longitude']]
             lat2, lon2 = coords.loc[j, ['Latitude', 'Longitude']]
-            dist = np.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
-            G.add_edge(i, j, weight=dist)
+            length = np.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
+            weight = length * received_costs['lowVoltageCostPerMeter']
+            G.add_edge(i, j, weight=length, length=length, voltage="low")
 
         mst = nx.minimum_spanning_tree(G, algorithm='kruskal')
 
         edges = []
+        total_weight = 0
+        low_voltage_length = 0
+        high_voltage_length = 0
         for u, v, d in mst.edges(data=True):
             p1 = coords.loc[u]
             p2 = coords.loc[v]
             edges.append({
                 "start": {"lat": float(p1['Latitude']), "lng": float(p1['Longitude'])},
                 "end":   {"lat": float(p2['Latitude']), "lng": float(p2['Longitude'])},
-                "weight": float(d['weight'])
+                "weight": float(d['weight']),
+                "length": float(d['length']),
+                "voltage": d['voltage'],
             })
+            low_voltage_length += d['length']
+            high_voltage_length += 0
+            total_weight += d['weight']
 
-        total_weight = sum(d['weight'] for _, _, d in mst.edges(data=True))
-
+   
         result = {
             "edges": edges,
             "total_weight": float(total_weight),
+            "low_voltage_length": float(low_voltage_length),
+            "high_voltage_length": float(high_voltage_length),
             "point_count": len(coords),
             "receivedCosts": received_costs,   # echo back
             "note": "Costs received but not yet used in calculation"

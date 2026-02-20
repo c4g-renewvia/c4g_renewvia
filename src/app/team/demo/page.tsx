@@ -38,6 +38,19 @@ export default function DemoPage() {
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
+
+  const [costBreakdown, setCostBreakdown] = useState<{
+    LowVoltageMeters: number | null;
+    HighVoltageMeters: number | null;
+    totalMeters: number | null;
+    lowWireCostEst: number;
+    highWireCostEst: number;
+    poleCountEst: number;
+    poleCostEst: number;
+    wireCostEst: number;
+    grandTotalEst: number;
+  } | null>(null);
+
   // Initialize map once Google Maps script loads
   const initMap = () => {
     if (!window.google?.maps || !mapRef.current) return;
@@ -204,6 +217,28 @@ export default function DemoPage() {
     });
   };
 
+  function haversineMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number {
+    const R = 6371000; // Earth's mean radius in meters
+
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) ** 2 +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // distance in meters
+  }
+
   const handleRunOptimization = async () => {
     if (dataPoints.length < 2) {
       alert('Need at least 2 points to run optimization.');
@@ -240,13 +275,63 @@ export default function DemoPage() {
 
       const data = await res.json();
 
+      console.log('Optimization result:', data);
+
       if (data.error) throw new Error(data.error);
 
-      setMstEdges(data.edges || []);
-      setMstTotal(data.total_weight || null);
+      let totalLowVoltageMeters = 0;
+      let totalHighVoltageMeters = 0;
+
+      const edges = data.edges || [];
+      const totalDegreeDiff = data.total_weight || 0;
+
+      edges.forEach((edge) => {
+        if (!edge?.start || !edge?.end) return;
+
+        const dist = haversineMeters(
+          edge.start.lat,
+          edge.start.lng,
+          edge.end.lat,
+          edge.end.lng
+        );
+
+        if (edge.voltage === 'low') {
+          totalLowVoltageMeters += dist;
+        } else {
+          totalHighVoltageMeters += dist;
+        }
+
+      });
+
+
+      // ────────────────────────────────────────────────
+      // Cost estimation using real meters
+      // ────────────────────────────────────────────────
+      const numPolesEstimate = edges.length + 1; // rough: poles ≈ segments + 1
+      const poleCostEst = numPolesEstimate * poleCost;
+
+      // For now assume all wire is low-voltage (change later)
+      const lowWireCostEst = totalLowVoltageMeters * (lowVoltageCost || 0);
+      const highWireCostEst = totalHighVoltageMeters * (highVoltageCost || 0);
+      // Or split: const wireCostEst = totalMeters * 0.7 * lowVoltageCost + totalMeters * 0.3 * highVoltageCost;
+
+      // Update states
+      setMstEdges(edges);
+      setMstTotal(totalDegreeDiff); // keep original for reference if needed
+      setCostBreakdown({
+        LowVoltageMeters: totalLowVoltageMeters,
+        HighVoltageMeters: totalHighVoltageMeters,
+        totalMeters: totalLowVoltageMeters + totalHighVoltageMeters, // new
+        lowWireCostEst: lowWireCostEst,
+        highWireCostEst: highWireCostEst,
+        poleCountEst: numPolesEstimate,
+        poleCostEst: poleCostEst,
+        wireCostEst: lowWireCostEst + highWireCostEst,
+        grandTotalEst: poleCostEst + lowWireCostEst + highWireCostEst,
+      });
 
       // Optional: show the echoed costs (for debugging/confirmation)
-    } catch (err: never) {
+    } catch (err: unknown) {
       setCalcError(err.message || 'Failed to run optimization');
       console.error(err);
     } finally {
@@ -405,10 +490,91 @@ export default function DemoPage() {
           {calcError && <p className='mt-6 text-red-400'>{calcError}</p>}
         </div>
 
+        {costBreakdown && (
+          <div className='mt-8 rounded-lg border border-emerald-700/30 bg-zinc-900/70 p-6 backdrop-blur-sm'>
+            <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
+              Estimated Mini-Grid Costs (Real Distance)
+            </h4>
+
+            {/* Summary Totals */}
+            <div className='mb-6 grid gap-4 md:grid-cols-2'>
+              <div>
+                <p className='text-sm text-zinc-400'>Total Wire Length</p>
+                <p className='text-xl font-medium text-white'>
+                  {costBreakdown.totalMeters?.toLocaleString() ?? '0'} m ≈{' '}
+                </p>
+              </div>
+
+              <div className='text-right'>
+                <p className='text-sm text-zinc-400'>Grand Total Estimate</p>
+                <p className='text-2xl font-bold text-emerald-300'>
+                  $
+                  {costBreakdown.grandTotalEst?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) ?? '0.00'}
+                </p>
+              </div>
+            </div>
+
+            {/* Detailed Breakdown */}
+            <div className='grid gap-6 md:grid-cols-3'>
+              {/* Poles */}
+              <div className='rounded bg-zinc-800/50 p-4'>
+                <p className='text-sm text-zinc-400'>Poles (est.)</p>
+                <p className='text-lg font-medium text-emerald-400'>
+                  {costBreakdown.poleCountEst ?? '—'} units
+                </p>
+                <p className='text-base font-semibold'>
+                  $
+                  {costBreakdown.poleCostEst?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) ?? '0.00'}
+                </p>
+              </div>
+
+              {/* Low Voltage */}
+              <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
+                <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
+                <p className='text-lg font-medium text-blue-300'>
+                  {costBreakdown.LowVoltageMeters?.toLocaleString() ?? '0'} m
+                </p>
+                <p className='text-base font-semibold'>
+                  $
+                  {costBreakdown.lowWireCostEst?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) ?? '0.00'}
+                </p>
+              </div>
+
+              {/* High Voltage */}
+              <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
+                <p className='text-sm text-zinc-400'>High Voltage Wire</p>
+                <p className='text-lg font-medium text-purple-300'>
+                  {costBreakdown.HighVoltageMeters?.toLocaleString() ?? '0'} m
+                </p>
+                <p className='text-base font-semibold'>
+                  $
+                  {costBreakdown.highWireCostEst?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) ?? '0.00'}
+                </p>
+              </div>
+            </div>
+
+            <p className='mt-6 text-center text-xs text-zinc-500'>
+              Based on MST great-circle distances • pole count ≈ edges + 1
+            </p>
+          </div>
+        )}
+
         {/* Map container */}
         <div
           ref={mapRef}
-          className='h-[70vh] w-full rounded-xl border border-zinc-700 shadow-2xl'
+          className='mt-8 h-[70vh] w-full rounded-xl border border-zinc-700 shadow-2xl'
         >
           Loading satellite map...
         </div>

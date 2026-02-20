@@ -20,7 +20,6 @@ interface MSTEdge {
   voltage: 'low' | 'high';
 }
 
-
 export default function DemoPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
@@ -37,7 +36,6 @@ export default function DemoPage() {
   const [highVoltageCost, setHighVoltageCost] = useState<number>(0);
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
-
 
   const [costBreakdown, setCostBreakdown] = useState<{
     LowVoltageMeters: number | null;
@@ -153,7 +151,7 @@ export default function DemoPage() {
           geodesic: true,
           strokeColor: '#FF4444',
           strokeOpacity: 0.95,
-          strokeWeight: 5,  // fixed for now — remove * edge.weight if it's huge
+          strokeWeight: 5, // fixed for now — remove * edge.weight if it's huge
           map: map,
         });
 
@@ -249,8 +247,12 @@ export default function DemoPage() {
     setMstEdges([]);
     setCalcError(null);
 
+    const backendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
+
     try {
-      const res = await fetch('/api/compute-mst', {
+      const res = await fetch(backendUrl, {
+        // ← points to FastAPI
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -301,7 +303,6 @@ export default function DemoPage() {
         }
       });
 
-
       // ────────────────────────────────────────────────
       // Cost estimation using real meters
       // ────────────────────────────────────────────────
@@ -329,9 +330,8 @@ export default function DemoPage() {
 
       // Optional: show the echoed costs (for debugging/confirmation)
     } catch (err: unknown) {
-
       if (err instanceof Error)
-      setCalcError(err.message || 'Failed to run optimization');
+        setCalcError(err.message || 'Failed to run optimization');
       console.error(err);
     } finally {
       setComputingMst(false);

@@ -1,9 +1,22 @@
 # backend/mst.py
 from typing import List, Dict, Union, Any
-import numpy as np
 import networkx as nx
-from itertools import combinations
 from pydantic import BaseModel
+import math
+
+
+def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate great-circle distance between two points in meters (haversine formula)."""
+    R = 6371000.0  # Earth mean radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+
+    a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
 
 class OptimizationRequest(BaseModel):
     """
@@ -14,91 +27,100 @@ class OptimizationRequest(BaseModel):
     points: List[Dict[str, Union[float, str, None]]]
     costs: Dict[str, float]
 
+
 def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     """
-    Compute Minimum Spanning Tree (MST) from list of points and costs.
-    
-    Args:
-        request: OptimizationRequest object from FastAPI
-        
-    Returns:
-        Dict with MST edges, lengths, costs, and metadata
-        
-    Raises:
-        ValueError: If fewer than 2 valid points
-        RuntimeError: On computation failure
+    Compute Minimum Spanning Tree (MST) from list of points and return
+    realistic length-based costs separated by voltage.
     """
-    # Extract points and costs
     points = request.points
     costs = request.costs
 
-    # Build cleaned coordinate list
+    # ─── Clean & validate input points ──────────────────────────────────────
     coords = []
     for p in points:
         lat = p.get("lat")
         lng = p.get("lng")
         if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-            coords.append({"Latitude": float(lat), "Longitude": float(lng)})
+            coords.append({"lat": float(lat), "lng": float(lng)})
 
     if len(coords) < 2:
         raise ValueError("Need at least 2 valid points with numeric lat/lng")
 
-    # Convert to DataFrame for consistency with your original code
-    import pandas as pd
-    coords_df = pd.DataFrame(coords)
+    # Extract cost parameters (with safe defaults)
+    pole_cost = float(costs.get("poleCost", 0))
+    low_voltage_cost_m = float(costs.get("lowVoltageCostPerMeter", 0))
+    high_voltage_cost_m = float(costs.get("highVoltageCostPerMeter", 0))
 
-    received_costs = {
-        "poleCost": float(costs.get("poleCost", 0)),
-        "lowVoltageCostPerMeter": float(costs.get("lowVoltageCostPerMeter", 0)),
-        "highVoltageCostPerMeter": float(costs.get("highVoltageCostPerMeter", 0)),
-    }
-
-    # Build graph
+    # ─── Build complete graph ───────────────────────────────────────────────
     G = nx.Graph()
-    for i, row in coords_df.iterrows():
-        G.add_node(i, pos=(row['Longitude'], row['Latitude']))
 
-    for (i, j) in combinations(coords_df.index, 2):
-        lat1, lon1 = coords_df.loc[i, ['Latitude', 'Longitude']]
-        lat2, lon2 = coords_df.loc[j, ['Latitude', 'Longitude']]
-        length = np.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
+    for i, pt in enumerate(coords):
+        G.add_node(i, pos=(pt["lng"], pt["lat"]))
 
-        # Current logic: all edges use low-voltage cost for weight
-        # You can make this smarter later (e.g. based on distance, name, etc.)
-        weight = length * received_costs['lowVoltageCostPerMeter']
+    for i in range(len(coords)):
+        for j in range(i + 1, len(coords)):
+            lat1, lon1 = coords[i]["lat"], coords[i]["lng"]
+            lat2, lon2 = coords[j]["lat"], coords[j]["lng"]
+            length_m = haversine_meters(lat1, lon1, lat2, lon2)
 
-        G.add_edge(i, j, weight=weight, length=length, voltage="low")
+            # For MST weight we still use low-voltage cost (common simplification)
+            # You can experiment with more sophisticated weighting later
+            weight = length_m * low_voltage_cost_m
 
-    # Compute MST
-    mst = nx.minimum_spanning_tree(G, algorithm='kruskal')
+            G.add_edge(i, j, weight=weight, length=length_m, voltage="low")
 
-    # Build result
+    # ─── Compute MST ────────────────────────────────────────────────────────
+    mst = nx.minimum_spanning_tree(G, algorithm="kruskal")
+
+    # ─── Collect MST edges + accumulate real lengths by voltage ─────────────
     edges = []
-    total_weight = 0.0
-    low_voltage_length = 0.0
-    high_voltage_length = 0.0
+    total_low_voltage_m = 0.0
+    total_high_voltage_m = 0.0
 
-    for u, v, d in mst.edges(data=True):
-        p1 = coords_df.loc[u]
-        p2 = coords_df.loc[v]
+    for u, v, data in mst.edges(data=True):
+        p1 = coords[u]
+        p2 = coords[v]
+        length_m = data["length"]
+        voltage = data["voltage"]  # currently always "low"
+
         edges.append({
-            "start": {"lat": float(p1['Latitude']), "lng": float(p1['Longitude'])},
-            "end": {"lat": float(p2['Latitude']), "lng": float(p2['Longitude'])},
-            "weight": float(d['weight']),
-            "length": float(d['length']),
-            "voltage": d['voltage'],
+            "start": {"lat": p1["lat"], "lng": p1["lng"]},
+            "end":   {"lat": p2["lat"], "lng": p2["lng"]},
+            "lengthMeters": round(length_m, 2),
+            "voltage": voltage,
         })
-        if d['voltage'] == 'low':
-            low_voltage_length += d['length']
-        else:
-            high_voltage_length += d['length']
-        total_weight += d['weight']
 
+        if voltage == "low":
+            total_low_voltage_m += length_m
+        else:
+            total_high_voltage_m += length_m
+
+    # ─── Cost estimation (moved from frontend) ──────────────────────────────
+    num_poles_estimate = len(edges) + 1 if edges else len(coords)  # rough heuristic
+    pole_cost_est = num_poles_estimate * pole_cost
+
+    low_wire_cost_est = total_low_voltage_m * low_voltage_cost_m
+    high_wire_cost_est = total_high_voltage_m * high_voltage_cost_m
+    total_wire_cost_est = low_wire_cost_est + high_wire_cost_est
+
+    total_cost_est = pole_cost_est + total_wire_cost_est
+
+    # ─── Return enriched result ─────────────────────────────────────────────
     return {
         "edges": edges,
-        "total_weight": float(total_weight),
-        "low_voltage_length": float(low_voltage_length),
-        "high_voltage_length": float(high_voltage_length),
-        "point_count": len(coords),
-        "receivedCosts": received_costs,
+        "totalLowVoltageMeters": round(total_low_voltage_m, 2),
+        "totalHighVoltageMeters": round(total_high_voltage_m, 2),
+        "numPolesEstimate": num_poles_estimate,
+        "poleCostEstimate": round(pole_cost_est, 2),
+        "lowWireCostEstimate": round(low_wire_cost_est, 2),
+        "highWireCostEstimate": round(high_wire_cost_est, 2),
+        "totalWireCostEstimate": round(total_wire_cost_est, 2),
+        "totalCostEstimate": round(total_cost_est, 2),
+        "pointCount": len(coords),
+        "usedCosts": {
+            "poleCost": pole_cost,
+            "lowVoltageCostPerMeter": low_voltage_cost_m,
+            "highVoltageCostPerMeter": high_voltage_cost_m,
+        },
     }

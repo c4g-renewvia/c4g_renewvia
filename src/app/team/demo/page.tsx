@@ -7,6 +7,14 @@ import Papa from 'papaparse';
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
+const formatMeters = (m: number) =>
+  m.toLocaleString(undefined, { maximumFractionDigits: 0 });
+const formatUSD = (v: number) =>
+  v.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
 interface LocationPoint {
   name: string;
   lat: number;
@@ -16,14 +24,36 @@ interface LocationPoint {
 interface MSTEdge {
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
-  weight: number;
+  lengthMeters: number;
   voltage: 'low' | 'high';
+}
+
+interface CostBreakdown {
+  lowVoltageMeters: number;
+  highVoltageMeters: number;
+  totalMeters: number;
+
+  lowWireCost: number;
+  highWireCost: number;
+  wireCost: number;
+
+  poleCount: number;
+  poleCost: number;
+  pointCount: number;
+
+  grandTotal: number;
+
+  // Debug / transparency
+  usedPoleCost?: number;
+  usedLowCostPerMeter?: number;
+  usedHighCostPerMeter?: number;
 }
 
 export default function DemoPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
+  const markersRef = useRef<google.maps.Marker[]>([]);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
   const [computingMst, setComputingMst] = useState(false);
@@ -37,17 +67,9 @@ export default function DemoPage() {
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
-  const [costBreakdown, setCostBreakdown] = useState<{
-    LowVoltageMeters: number | null;
-    HighVoltageMeters: number | null;
-    totalMeters: number | null;
-    lowWireCostEst: number;
-    highWireCostEst: number;
-    poleCountEst: number;
-    poleCostEst: number;
-    wireCostEst: number;
-    grandTotalEst: number;
-  } | null>(null);
+  const [costBreakdown, setCostBreakdown] = useState<CostBreakdown | null>(
+    null
+  );
 
   // Initialize map once Google Maps script loads
   const initMap = () => {
@@ -67,10 +89,13 @@ export default function DemoPage() {
   // Add markers and fit bounds whenever dataPoints or map changes
   // Effect 1: Draw / update markers (runs when dataPoints or map changes)
   useEffect(() => {
-    if (!map || dataPoints.length === 0) return;
+    if (!map) return;
 
-    // Optional: Clear old markers if you have them in a ref too
-    // For now assuming markers are recreated each time (simple but works)
+    // Always clear old markers so a new CSV fully refreshes the map
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+
+    if (dataPoints.length === 0) return;
 
     const bounds = new google.maps.LatLngBounds();
 
@@ -107,7 +132,7 @@ export default function DemoPage() {
 
       const color = nameToColor.get(point.name) || 'red';
 
-      new google.maps.Marker({
+      const marker = new google.maps.Marker({
         position: { lat: point.lat, lng: point.lng },
         map,
         label: {
@@ -123,6 +148,7 @@ export default function DemoPage() {
         title: point.name,
       });
 
+      markersRef.current.push(marker);
       bounds.extend({ lat: point.lat, lng: point.lng });
     });
 
@@ -164,10 +190,17 @@ export default function DemoPage() {
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // allow uploading the same file name again
     if (!file) return;
 
-    setFileName(file.name);
+    // Reset anything derived from the previous CSV so the map + UI refresh cleanly
+    setMstEdges([]);
+    setCostBreakdown(null);
+    setCalcError(null);
     setError(null);
+    setDataPoints([]);
+
+    setFileName(file.name);
     setLoading(true);
 
     Papa.parse(file, {
@@ -197,6 +230,7 @@ export default function DemoPage() {
             setError(
               'No valid rows found. Expected columns: Name, Latitude, Longitude (case-insensitive). Make sure lat/lng are numbers.'
             );
+            setDataPoints([]); // ensure old markers stay cleared
           } else {
             setDataPoints(parsedPoints);
           }
@@ -215,28 +249,6 @@ export default function DemoPage() {
     });
   };
 
-  function haversineMeters(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number {
-    const R = 6371000; // Earth's mean radius in meters
-
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a =
-      Math.sin(Δφ / 2) ** 2 +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // distance in meters
-  }
-
   const handleRunOptimization = async () => {
     if (dataPoints.length < 2) {
       alert('Need at least 2 points to run optimization.');
@@ -245,6 +257,7 @@ export default function DemoPage() {
 
     setComputingMst(true);
     setMstEdges([]);
+    setCostBreakdown(null); // ← clear previous breakdown
     setCalcError(null);
 
     const backendUrl =
@@ -252,14 +265,13 @@ export default function DemoPage() {
 
     try {
       const res = await fetch(backendUrl, {
-        // ← points to FastAPI
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           points: dataPoints.map((p) => ({
             lat: p.lat,
             lng: p.lng,
-            name: p.name,
+            name: p.name ?? null,
           })),
           costs: {
             poleCost: poleCost || 0,
@@ -271,7 +283,9 @@ export default function DemoPage() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Optimization failed');
+        throw new Error(
+          errData.detail || errData.error || 'Optimization failed'
+        );
       }
 
       const data = await res.json();
@@ -280,59 +294,60 @@ export default function DemoPage() {
 
       if (data.error) throw new Error(data.error);
 
-      let totalLowVoltageMeters = 0;
-      let totalHighVoltageMeters = 0;
-
+      // ────────────────────────────────────────────────
+      // Backend now already gives us everything we need
+      // ────────────────────────────────────────────────
       const edges = data.edges || [];
 
-      // comput haverstine distance between each edge
-      edges.forEach((edge: MSTEdge) => {
-        if (!edge?.start || !edge?.end) return;
+      // Use pre-computed values from backend
+      const {
+        totalLowVoltageMeters = 0,
+        totalHighVoltageMeters = 0,
+        numPolesEstimate = 0,
+        poleCostEstimate = 0,
+        lowWireCostEstimate = 0,
+        highWireCostEstimate = 0,
+        totalWireCostEstimate = 0,
+        totalCostEstimate = 0,
+        pointCount = 0,
+        usedCosts, // optional – for display/debug
+      } = data;
 
-        const dist = haversineMeters(
-          edge.start.lat,
-          edge.start.lng,
-          edge.end.lat,
-          edge.end.lng
-        );
+      // Update edges (now includes lengthMeters & voltage)
+      setMstEdges(
+        edges.map((e: MSTEdge) => ({
+          start: e.start,
+          end: e.end,
+          lengthMeters: e.lengthMeters ?? 0,
+          voltage: e.voltage ?? 'low',
+        }))
+      );
 
-        if (edge.voltage === 'low') {
-          totalLowVoltageMeters += dist;
-        } else {
-          totalHighVoltageMeters += dist;
-        }
-      });
-
-      // ────────────────────────────────────────────────
-      // Cost estimation using real meters
-      // ────────────────────────────────────────────────
-      const numPolesEstimate = edges.length + 1; // rough: poles ≈ segments + 1
-      const poleCostEst = numPolesEstimate * poleCost;
-
-      // For now assume all wire is low-voltage (change later)
-      const lowWireCostEst = totalLowVoltageMeters * (lowVoltageCost || 0);
-      const highWireCostEst = totalHighVoltageMeters * (highVoltageCost || 0);
-      // Or split: const wireCostEst = totalMeters * 0.7 * lowVoltageCost + totalMeters * 0.3 * highVoltageCost;
-
-      // Update states
-      setMstEdges(edges);
+      // Update cost breakdown state – directly from backend
       setCostBreakdown({
-        LowVoltageMeters: totalLowVoltageMeters,
-        HighVoltageMeters: totalHighVoltageMeters,
-        totalMeters: totalLowVoltageMeters + totalHighVoltageMeters, // new
-        lowWireCostEst: lowWireCostEst,
-        highWireCostEst: highWireCostEst,
-        poleCountEst: numPolesEstimate,
-        poleCostEst: poleCostEst,
-        wireCostEst: lowWireCostEst + highWireCostEst,
-        grandTotalEst: poleCostEst + lowWireCostEst + highWireCostEst,
-      });
+        lowVoltageMeters: totalLowVoltageMeters,
+        highVoltageMeters: totalHighVoltageMeters,
+        totalMeters: totalLowVoltageMeters + totalHighVoltageMeters,
 
-      // Optional: show the echoed costs (for debugging/confirmation)
+        lowWireCost: lowWireCostEstimate,
+        highWireCost: highWireCostEstimate,
+        wireCost: totalWireCostEstimate,
+
+        poleCount: numPolesEstimate,
+        poleCost: poleCostEstimate,
+        pointCount: pointCount,
+
+        grandTotal: totalCostEstimate,
+
+        usedPoleCost: usedCosts?.poleCost,
+        usedLowCostPerMeter: usedCosts?.lowVoltageCostPerMeter,
+        usedHighCostPerMeter: usedCosts?.highVoltageCostPerMeter,
+      });
     } catch (err: unknown) {
-      if (err instanceof Error)
-        setCalcError(err.message || 'Failed to run optimization');
-      console.error(err);
+      const message =
+        err instanceof Error ? err.message : 'Failed to run optimization';
+      setCalcError(message);
+      console.error('Optimization error:', err);
     } finally {
       setComputingMst(false);
     }
@@ -424,7 +439,7 @@ export default function DemoPage() {
                 step='0.01'
                 min='0'
                 value={poleCost}
-                onChange={(e) => setPoleCost(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setPoleCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
                 placeholder='e.g. 150.00'
               />
@@ -439,9 +454,7 @@ export default function DemoPage() {
                 step='0.01'
                 min='0'
                 value={lowVoltageCost}
-                onChange={(e) =>
-                  setLowVoltageCost(parseFloat(e.target.value) || 0)
-                }
+                onChange={(e) => setLowVoltageCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
                 placeholder='e.g. 2.50'
               />
@@ -456,9 +469,7 @@ export default function DemoPage() {
                 step='0.01'
                 min='0'
                 value={highVoltageCost}
-                onChange={(e) =>
-                  setHighVoltageCost(parseFloat(e.target.value) || 0)
-                }
+                onChange={(e) => setHighVoltageCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
                 placeholder='e.g. 5.75'
               />
@@ -500,18 +511,14 @@ export default function DemoPage() {
               <div>
                 <p className='text-sm text-zinc-400'>Total Wire Length</p>
                 <p className='text-xl font-medium text-white'>
-                  {costBreakdown.totalMeters?.toLocaleString() ?? '0'} m ≈{' '}
+                  {formatMeters(costBreakdown.totalMeters) ?? '0'} m ≈{' '}
                 </p>
               </div>
 
               <div className='text-right'>
                 <p className='text-sm text-zinc-400'>Grand Total Estimate</p>
                 <p className='text-2xl font-bold text-emerald-300'>
-                  $
-                  {costBreakdown.grandTotalEst?.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }) ?? '0.00'}
+                  ${formatUSD(costBreakdown.grandTotal) ?? '0.00'}
                 </p>
               </div>
             </div>
@@ -522,14 +529,10 @@ export default function DemoPage() {
               <div className='rounded bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Poles (est.)</p>
                 <p className='text-lg font-medium text-emerald-400'>
-                  {costBreakdown.poleCountEst ?? '—'} units
+                  {costBreakdown.poleCount ?? '—'} units
                 </p>
                 <p className='text-base font-semibold'>
-                  $
-                  {costBreakdown.poleCostEst?.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }) ?? '0.00'}
+                  ${formatUSD(costBreakdown.poleCost) ?? '0.00'}
                 </p>
               </div>
 
@@ -537,14 +540,10 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
                 <p className='text-lg font-medium text-blue-300'>
-                  {costBreakdown.LowVoltageMeters?.toLocaleString() ?? '0'} m
+                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m
                 </p>
                 <p className='text-base font-semibold'>
-                  $
-                  {costBreakdown.lowWireCostEst?.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }) ?? '0.00'}
+                  ${formatUSD(costBreakdown.lowWireCost) ?? '0.00'}
                 </p>
               </div>
 
@@ -552,14 +551,10 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>High Voltage Wire</p>
                 <p className='text-lg font-medium text-purple-300'>
-                  {costBreakdown.HighVoltageMeters?.toLocaleString() ?? '0'} m
+                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m
                 </p>
                 <p className='text-base font-semibold'>
-                  $
-                  {costBreakdown.highWireCostEst?.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }) ?? '0.00'}
+                  ${formatUSD(costBreakdown.highWireCost) ?? '0.00'}
                 </p>
               </div>
             </div>

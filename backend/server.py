@@ -10,7 +10,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:8000",
-        "https://renewvia.vercel.app",  # ← replace with your real domain
+        "https://c4g-renewvia.vercel.app",  # ← replace with your real domain
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -44,6 +44,12 @@ export default function Home() {
           >
             Read project description
           </a>
+          <a
+            href='/team/demo'
+            className='inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-medium text-white/90 backdrop-blur transition hover:bg-white/10 focus:ring-2 focus:ring-white/20 focus:outline-none'
+          >
+            See the Demo
+          </a>
         </div>
 
         {/* Bottom card */}

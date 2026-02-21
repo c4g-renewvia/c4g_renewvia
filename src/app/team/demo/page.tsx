@@ -247,8 +247,11 @@ export default function DemoPage() {
     setMstEdges([]);
     setCalcError(null);
 
+    const backendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
+
     try {
-      const res = await fetch('http://localhost:8000/optimize', {
+      const res = await fetch(backendUrl, {
         // ← points to FastAPI
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

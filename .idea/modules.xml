@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/renewvia.iml" filepath="$PROJECT_DIR$/.idea/renewvia.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/c4g_renewvia.iml" filepath="$PROJECT_DIR$/.idea/c4g_renewvia.iml" />
     </modules>
   </component>
 </project>

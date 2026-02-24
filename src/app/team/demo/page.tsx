@@ -324,7 +324,7 @@ export default function DemoPage() {
     // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees
     // Longitude degrees vary with latitude, but we'll use a center point
     const centerLat = 33.77728650419152; // Georgia Tech campus, Atlanta, GA
-    const centerLng = 84.39617097270636;
+    const centerLng = -84.39617097270636;
     const latRange = 0.145; // ~10 miles north/south
     const lngRange = 0.145 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
 

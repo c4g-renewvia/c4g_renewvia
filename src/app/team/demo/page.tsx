@@ -321,12 +321,13 @@ export default function DemoPage() {
 
     // Generate random points within a 100 square mile area
     // 100 square miles is roughly 10 miles x 10 miles
-    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees
+    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees,
+    // 0.001 degrees ≈ 0.07 miles - more on the scale of the mini grids
     // Longitude degrees vary with latitude, but we'll use a center point
     const centerLat = 33.77728650419152; // Georgia Tech campus, Atlanta, GA
     const centerLng = -84.39617097270636;
-    const latRange = 0.145; // ~10 miles north/south
-    const lngRange = 0.145 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
+    const latRange = 0.001; // small
+    const lngRange = 0.001 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
 
     const points: LocationPoint[] = [];
     const maxAttempts = count * 10; // Prevent infinite loops

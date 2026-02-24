@@ -28,6 +28,14 @@ interface MSTEdge {
   voltage: 'low' | 'high';
 }
 
+interface MSTNode {
+  index: number;
+  lat: number;
+  lng: number;
+  name: string;
+  type: 'source' | 'building' | 'pole';
+}
+
 interface CostBreakdown {
   lowVoltageMeters: number;
   highVoltageMeters: number;
@@ -56,14 +64,15 @@ export default function DemoPage() {
   const markersRef = useRef<google.maps.Marker[]>([]);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
+  const [mstNodes, setMstNodes] = useState<MSTNode[]>([]);
   const [computingMst, setComputingMst] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [poleCost, setPoleCost] = useState<number>(0);
-  const [lowVoltageCost, setLowVoltageCost] = useState<number>(0);
-  const [highVoltageCost, setHighVoltageCost] = useState<number>(0);
+  const [poleCost, setPoleCost] = useState<number>(1000);
+  const [lowVoltageCost, setLowVoltageCost] = useState<number>(4);
+  const [highVoltageCost, setHighVoltageCost] = useState<number>(10);
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
@@ -93,102 +102,136 @@ export default function DemoPage() {
   useEffect(() => {
     if (!map) return;
 
-    // Always clear old markers so a new CSV fully refreshes the map
+    // Clear old markers
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
 
-    if (dataPoints.length === 0) return;
-
     const bounds = new google.maps.LatLngBounds();
+    let hasValidPoints = false;
 
-    // Your existing color assignment + marker creation
-    const colorPalette = [
-      'red',
-      'blue',
-      'green',
-      'yellow',
-      'purple',
-      'pink',
-      'orange',
-      'ltblue',
-      'cyan',
-      'magenta',
-      'lime',
-      'teal',
-    ];
-    const nameToColor = new Map<string, string>();
-    let colorIndex = 0;
+    // Case 1: Show raw uploaded points if no MST result yet
+    if (mstNodes.length === 0 && dataPoints.length > 0) {
+      dataPoints.forEach((point) => {
+        if (isNaN(point.lat) || isNaN(point.lng)) return;
+        hasValidPoints = true;
 
-    dataPoints.forEach((point) => {
-      if (!nameToColor.has(point.name)) {
-        nameToColor.set(
-          point.name,
-          colorPalette[colorIndex % colorPalette.length]
-        );
-        colorIndex++;
-      }
-    });
+        const marker = new google.maps.Marker({
+          position: { lat: point.lat, lng: point.lng },
+          map,
+          label: {
+            text: point.name,
+            color: 'white',
+            fontSize: '13px',
+            fontWeight: 'bold',
+          },
+          icon: {
+            url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+            scaledSize: new google.maps.Size(36, 36),
+          },
+          title: point.name,
+        });
 
-    dataPoints.forEach((point) => {
-      if (isNaN(point.lat) || isNaN(point.lng)) return;
-
-      const color = nameToColor.get(point.name) || 'red';
-
-      const marker = new google.maps.Marker({
-        position: { lat: point.lat, lng: point.lng },
-        map,
-        label: {
-          text: point.name,
-          color: 'white',
-          fontSize: '13px',
-          fontWeight: 'bold',
-        },
-        icon: {
-          url: `http://maps.google.com/mapfiles/ms/icons/${color}-dot.png`,
-          scaledSize: new google.maps.Size(36, 36),
-        },
-        title: point.name,
+        markersRef.current.push(marker);
+        bounds.extend({ lat: point.lat, lng: point.lng });
       });
-
-      markersRef.current.push(marker);
-      bounds.extend({ lat: point.lat, lng: point.lng });
-    });
-
-    // Fit bounds only if no MST yet (or always – your choice)
-    if (mstEdges.length === 0) {
-      map.fitBounds(bounds, { bottom: 100, left: 80, right: 80, top: 100 });
     }
-  }, [map, dataPoints, mstEdges]); // ← add mstEdges if you want refit after MST
 
+    // Case 2: Show optimized nodes (source + buildings + poles)
+    else if (mstNodes.length > 0) {
+      hasValidPoints = true;
+      mstNodes.forEach((node) => {
+        if (isNaN(node.lat) || isNaN(node.lng)) return;
+
+        let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
+        let labelColor = 'white';
+        let scaledSize = new google.maps.Size(36, 36);
+
+        switch (node.type) {
+          case 'source':
+            iconUrl += 'green-dot.png';
+            labelColor = '#00ff00';
+            scaledSize = new google.maps.Size(44, 44);
+            break;
+          case 'building':
+            iconUrl += 'blue-dot.png';
+            break;
+          case 'pole':
+            iconUrl += 'yellow-dot.png';
+            scaledSize = new google.maps.Size(28, 28);
+            break;
+          default:
+            iconUrl += 'red-dot.png';
+        }
+
+        const marker = new google.maps.Marker({
+          position: { lat: node.lat, lng: node.lng },
+          map,
+          label: {
+            text: node.name,
+            color: labelColor,
+            fontSize: node.type === 'pole' ? '11px' : '13px',
+            fontWeight: 'bold',
+          },
+          icon: { url: iconUrl, scaledSize },
+          title: `${node.name} (${node.type})`,
+        });
+
+        markersRef.current.push(marker);
+        bounds.extend({ lat: node.lat, lng: node.lng });
+      });
+    }
+
+    // Always try to fit bounds if we have something to show
+    if (hasValidPoints && !bounds.isEmpty()) {
+      // Add a small delay to ensure map is ready for fitBounds
+      setTimeout(() => {
+        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+      }, 100);
+    }
+  }, [map, dataPoints, mstNodes]);
+
+  // Draw lines on map
   useEffect(() => {
     if (!map) return;
 
-    // Clear old lines
     polylinesRef.current.forEach((line) => line.setMap(null));
     polylinesRef.current = [];
 
-    mstEdges.forEach((edge, index) => {
-      if (!edge?.start || !edge?.end) {
-        console.warn(`Skipping invalid edge at index ${index}:`, edge);
-        return;
-      }
+    mstEdges.forEach((edge) => {
+      if (!edge?.start || !edge?.end) return;
 
-      try {
-        const polyline = new google.maps.Polyline({
-          path: [edge.start, edge.end],
-          geodesic: true,
-          strokeColor: '#FF4444',
-          strokeOpacity: 0.95,
-          strokeWeight: 5, // fixed for now — remove * edge.weight if it's huge
-          map: map,
-        });
+      const color = edge.voltage === 'high' ? '#8B5CF6' : '#3B82F6'; // purple high, blue low
+      const weight = edge.voltage === 'high' ? 6 : 4;
 
-        polylinesRef.current.push(polyline);
-      } catch (err) {
-        console.error('Failed to draw polyline:', err, edge);
-      }
+      const polyline = new google.maps.Polyline({
+        path: [edge.start, edge.end],
+        geodesic: true,
+        strokeColor: color,
+        strokeOpacity: 0.9,
+        strokeWeight: weight,
+        map: map,
+      });
+
+      polylinesRef.current.push(polyline);
     });
   }, [map, mstEdges]);
+
+  // fit map to uploaded points immediately (before optimization)
+  useEffect(() => {
+    if (!map || dataPoints.length === 0 || mstNodes.length > 0) return; // skip if MST already drawn
+
+    const bounds = new google.maps.LatLngBounds();
+
+    dataPoints.forEach((point) => {
+      if (!isNaN(point.lat) && !isNaN(point.lng)) {
+        bounds.extend({ lat: point.lat, lng: point.lng });
+      }
+    });
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+    }
+  }, [map, dataPoints]); // only when raw points change
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -201,11 +244,11 @@ export default function DemoPage() {
   const processFile = (file: File) => {
     // Reset anything derived from the previous CSV so the map + UI refresh cleanly
     setMstEdges([]);
+    setMstNodes([]);
     setCostBreakdown(null);
     setCalcError(null);
     setError(null);
     setDataPoints([]);
-
     setFileName(file.name);
     setLoading(true);
 
@@ -242,6 +285,8 @@ export default function DemoPage() {
               return { name, lat, lng };
             })
             .filter((p): p is LocationPoint => p !== null);
+
+          console.log('Parsed CSV:', parsedPoints);
 
           if (parsedPoints.length === 0) {
             setError(
@@ -365,6 +410,8 @@ export default function DemoPage() {
     const backendUrl =
       process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
 
+    const startTime = performance.now();
+
     try {
       const res = await fetch(backendUrl, {
         method: 'POST',
@@ -390,9 +437,18 @@ export default function DemoPage() {
         );
       }
 
+      const endTime = performance.now();
+      const durationMs = endTime - startTime;
+      const durationSec = (durationMs / 1000).toFixed(2);
+
+      console.log(
+        `%c[API Request] Optimization took ${durationMs.toFixed(0)} ms (${durationSec} sec)`,
+        'background: #1e293b; color: #60a5fa; padding: 4px 8px; border-radius: 4px;'
+      );
+
       const data = await res.json();
 
-      console.log('Optimization result:', data);
+      // console.log('Optimization result:', data);
 
       if (data.error) throw new Error(data.error);
 
@@ -405,7 +461,7 @@ export default function DemoPage() {
       const {
         totalLowVoltageMeters = 0,
         totalHighVoltageMeters = 0,
-        numPolesEstimate = 0,
+        numPolesUsed = 0,
         poleCostEstimate = 0,
         lowWireCostEstimate = 0,
         highWireCostEstimate = 0,
@@ -414,6 +470,8 @@ export default function DemoPage() {
         pointCount = 0,
         usedCosts, // optional – for display/debug
       } = data;
+
+      setMstNodes(data.nodes || []);
 
       // Update edges (now includes lengthMeters & voltage)
       setMstEdges(
@@ -435,7 +493,7 @@ export default function DemoPage() {
         highWireCost: highWireCostEstimate,
         wireCost: totalWireCostEstimate,
 
-        poleCount: numPolesEstimate,
+        poleCount: numPolesUsed,
         poleCost: poleCostEstimate,
         pointCount: pointCount,
 
@@ -627,7 +685,6 @@ export default function DemoPage() {
                 value={poleCost}
                 onChange={(e) => setPoleCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-                placeholder='e.g. 150.00'
               />
             </div>
 
@@ -642,7 +699,6 @@ export default function DemoPage() {
                 value={lowVoltageCost}
                 onChange={(e) => setLowVoltageCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-                placeholder='e.g. 2.50'
               />
             </div>
 
@@ -657,7 +713,6 @@ export default function DemoPage() {
                 value={highVoltageCost}
                 onChange={(e) => setHighVoltageCost(parseFloat(e.target.value))}
                 className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-                placeholder='e.g. 5.75'
               />
             </div>
           </div>

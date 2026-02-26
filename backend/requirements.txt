@@ -1,5 +1,6 @@
 networkx
 numpy
 pydantic
+pandas
 scipy
 fastapi

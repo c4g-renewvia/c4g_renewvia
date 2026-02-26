@@ -1,5 +1,5 @@
-networkx==3.1
+networkx
 numpy
-pydantic==2.12.5
-scipy==1.5.1
-fastapi==0.129.0
+pydantic
+scipy
+fastapi

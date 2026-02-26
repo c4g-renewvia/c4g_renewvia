@@ -7,9 +7,15 @@ from scipy.spatial import Voronoi
 from scipy.spatial.distance import cdist
 from pydantic import BaseModel
 
-# CONSTANTS
-MAX_DESTINATION_TO_POLE = 100.0  # METERS
-MAX_POLE_TO_POLE = 150.0  # METERS
+# CONSTANTS in METERS
+MIN_DESTINATION_TO_POLE = 10.0
+MAX_DESTINATION_TO_POLE = 100.0
+
+MIN_POLE_TO_POLE = 10.0
+MAX_POLE_TO_POLE = 150.0
+
+MIN_DIST_TO_TERMINAL=8.0,
+MAX_CIRCUMRADIUS=300.0
 
 
 def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -37,7 +43,23 @@ def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> floa
     return R * c
 
 
-def generate_voronoi_candidates(coords: np.ndarray, min_dist_to_terminal=8.0, max_circumradius=None):
+def generate_voronoi_candidates(coords: np.ndarray):
+    """
+    Generates candidate points based on a Voronoi diagram constructed from the input coordinates
+    and applies filtering criteria such as minimum and maximum distance thresholds. This is
+    typically used in geographic computations to identify poles from Voronoi vertices.
+
+    Args:
+    coords: An array of shape (n, 2) where n is the number of coordinate points. Each row
+        represents a point with latitude and longitude as respective columns. The input must
+        contain at least 3 coordinate points for Voronoi computation.
+    Returns:
+        A numpy array of candidate points with shape (m, 2), where m is the number of
+        filtered candidate points. Each row represents a point with latitude and longitude as
+        respective columns. If no candidates meet the criteria, an empty array of shape (0, 2)
+        is returned.
+    """
+
     if len(coords) < 3:
         return np.empty((0, 2), dtype=float)
 
@@ -67,10 +89,10 @@ def generate_voronoi_candidates(coords: np.ndarray, min_dist_to_terminal=8.0, ma
     min_dists = nearest_dists[:, 0]
     third_min_dists = nearest_dists[:, 2]
 
-    mask = min_dists >= min_dist_to_terminal
+    mask = min_dists >= MIN_DIST_TO_TERMINAL
 
-    if max_circumradius is not None:
-        mask &= (third_min_dists <= max_circumradius)
+    if MAX_CIRCUMRADIUS is not None:
+        mask &= (third_min_dists <= MAX_CIRCUMRADIUS)
 
     candidates = verts[mask]
 
@@ -106,10 +128,6 @@ def build_directed_graph_for_arborescence(
         costs: Dictionary storing cost values for graph construction. Specifically,
                it should include the `"poleCost"` key to determine the cost addition
                for pole-to-pole connections.
-        max_destination_to_pole: Optional; Maximum distance (float) allowed between a pole
-                           and a destination for adding an edge. Default is 80.0.
-        max_pole_to_pole: Optional; Maximum distance (float) allowed between two poles
-                          for adding an edge. Default is 150.0.
 
     Returns:
         nx.DiGraph: A directed graph with the defined nodes and edges.
@@ -284,11 +302,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     coords, destination_indices, source_idx, original_names, costs = parse_input(request)
 
     # ─── Generate candidates ────────────────────────────────────────────────
-    candidates = generate_voronoi_candidates(
-        coords,
-        min_dist_to_terminal=8.0,
-        max_circumradius=300.0
-    )
+    candidates = generate_voronoi_candidates(coords)
 
     if len(candidates) > 0:
         extended_coords = np.vstack([coords, candidates])

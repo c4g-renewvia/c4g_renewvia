@@ -17,7 +17,7 @@ const formatUSD = (v: number) =>
 
 interface LocationPoint {
   name: string;
-  type: 'source' | 'destination' | 'pole';
+  type: 'source' | 'terminal' | 'pole';
   lat: number;
   lng: number;
 }
@@ -34,7 +34,7 @@ interface MSTNode {
   lat: number;
   lng: number;
   name: string;
-  type: 'source' | 'destination' | 'pole';
+  type: 'source' | 'terminal' | 'pole';
 }
 
 interface CostBreakdown {
@@ -104,11 +104,11 @@ export default function DemoPage() {
       lat: number;
       lng: number;
       name: string;
-      type?: 'source' | 'destination' | 'pole';
+      type?: 'source' | 'terminal' | 'pole';
     },
     map: google.maps.Map
   ) => {
-    const type = point.type || 'destination'; // raw uploaded points → treat as 'destination'
+    const type = point.type || 'terminal'; // raw uploaded points → treat as 'terminal'
 
     let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
     let labelColor = 'white';
@@ -122,7 +122,7 @@ export default function DemoPage() {
         scaledSize = new google.maps.Size(44, 44);
         break;
 
-      case 'destination':
+      case 'terminal':
         iconUrl += 'blue-dot.png';
         labelColor = 'white';
         // keep default size
@@ -313,7 +313,7 @@ export default function DemoPage() {
           if (parsedPoints.length === 0) {
             setError(
               'No valid rows found. Expected columns: Name, Type, Latitude, Longitude (case-insensitive). ' +
-                'Make sure lat/lng are numbers and Type is either "source" or "destination".'
+                'Make sure lat/lng are numbers and Type is either "source" or "terminal".'
             );
             setDataPoints([]); // ensure old markers stay cleared
           } else {
@@ -374,7 +374,7 @@ export default function DemoPage() {
       );
 
       if (!isDuplicate) {
-        const type = points.length === 0 ? 'source' : 'destination';
+        const type = points.length === 0 ? 'source' : 'terminal';
         const name =
           points.length === 0
             ? 'Source'
@@ -672,7 +672,7 @@ export default function DemoPage() {
             Example: <br />
             <code className='text-blue-300'>
               Georgia Tech, source, 33.77728650, -84.39617097 <br />
-              Building 1, destination, 33.77798650, -84.39613097
+              Building 1, terminal, 33.77798650, -84.39613097
             </code>
           </p>
 
@@ -977,8 +977,8 @@ export default function DemoPage() {
               {/* Optional footer info */}
               {mstNodes.length > 0 && (
                 <p className='mt-4 text-center text-xs text-zinc-500'>
-                  Showing optimized nodes (source + destinations + poles).
-                  Scroll for full list.
+                  Showing optimized nodes (source + terminals + poles). Scroll
+                  for full list.
                 </p>
               )}
             </div>

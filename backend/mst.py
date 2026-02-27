@@ -16,8 +16,8 @@ EXCLUSION_RADIUS_METERS = 15.0
 MIN_CANDIDATE_SEPARATION = 10.0
 
 # CONSTANTS in METERS
-MIN_POLE_TO_DESTINATION = 10.0
-MAX_POLE_TO_DESTINATION = 100.0
+MIN_POLE_TO_TERMINAL = 10.0
+MAX_POLE_TO_TERMINAL = 100.0
 
 MIN_POLE_TO_POLE = 10.0
 MAX_POLE_TO_POLE = 150.0
@@ -133,7 +133,7 @@ def generate_voronoi_candidates(coords: np.ndarray) -> np.ndarray:
 
 def build_directed_graph_for_arborescence(
         source_idx,
-        destination_indices,
+        terminal_indices,
         pole_indices,
         dist_matrix,
         costs,
@@ -142,14 +142,14 @@ def build_directed_graph_for_arborescence(
     Builds a directed graph for use in finding a minimum-cost arborescence given
     a set of coordinates, indices, and constraints.
 
-    This function constructs a directed graph where poles and destinations are represented
+    This function constructs a directed graph where poles and terminals are represented
     as nodes, and edges represent potential connections between them. Different weight
-    and voltage attributes are applied to the edges depending on their type (pole-to-destination,
-    pole-to-pole, or source-to-pole/destination connections).
+    and voltage attributes are applied to the edges depending on their type (pole-to-terminal,
+    pole-to-pole, or source-to-pole/terminal connections).
 
     Args:
         source_idx: Integer index representing the source node (e.g., a substation).
-        destination_indices: List of integers representing indices of all destinations.
+        terminal_indices: List of integers representing indices of all terminals.
         pole_indices: List of integers representing indices of all poles.
         dist_matrix: 2D matrix where each element represents the distance between nodes.
         costs: Dictionary storing cost values for graph construction. Specifically,
@@ -166,11 +166,11 @@ def build_directed_graph_for_arborescence(
 
     DG = nx.DiGraph()
 
-    # Directed: poles → destinations (service drops)
+    # Directed: poles → terminals (service drops)
     for p in pole_indices:
-        for h in destination_indices:
+        for h in terminal_indices:
             d = dist_matrix[p, h]
-            if 0.1 < d <= MAX_POLE_TO_DESTINATION:
+            if 0.1 < d <= MAX_POLE_TO_TERMINAL:
                 w = d  # TODO: Adjust weight based on costs
                 DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
@@ -194,19 +194,19 @@ def build_directed_graph_for_arborescence(
     return DG
 
 
-def prune_dead_end_pole_branches(arbo: nx.DiGraph, pole_indices: list, destination_indices) -> nx.DiGraph:
+def prune_dead_end_pole_branches(arbo: nx.DiGraph, pole_indices: list, terminal_indices) -> nx.DiGraph:
     """
     Prunes dead-end pole branches in a Directed Graph (DiGraph).
 
     This function removes leaf nodes in the provided graph that represent poles and do not serve
-    any destination nodes in their subtree. The pruning process continues iteratively until no such
+    any terminal nodes in their subtree. The pruning process continues iteratively until no such
     dead-end poles remain in the graph. It modifies a copy of the input graph without affecting
     the original.
 
     Args:
         arbo (nx.DiGraph): A directed graph representing the network structure.
         pole_indices (list): A list of node indices representing poles in the graph.
-        destination_indices (list): A list of node indices representing destinations in the graph.
+        terminal_indices (list): A list of node indices representing terminals in the graph.
 
     Returns:
         nx.DiGraph: A new directed graph with dead-end pole branches removed.
@@ -218,10 +218,10 @@ def prune_dead_end_pole_branches(arbo: nx.DiGraph, pole_indices: list, destinati
         leaves = [n for n in arbo.nodes() if arbo.out_degree(n) == 0]
         for leaf in leaves:
             if leaf in pole_indices:
-                # Check if this leaf (or its subtree) serves any destination
+                # Check if this leaf (or its subtree) serves any terminal
                 descendants = nx.descendants(arbo, leaf) | {leaf}
-                if not any(d in destination_indices for d in descendants):
-                    # No destination served → safe to remove
+                if not any(d in terminal_indices for d in descendants):
+                    # No terminal served → safe to remove
                     predecessors = list(arbo.predecessors(leaf))
                     for pred in predecessors:
                         arbo.remove_edge(pred, leaf)
@@ -376,14 +376,14 @@ def parse_input(request: OptimizationRequest):
 
     This function processes the input `OptimizationRequest` to extract coordinates, their names, and classify one of the
     locations as the "Power Source". It ensures that the input contains at least two valid points, assigns a "Power Source"
-    if not explicitly provided, and organizes the remaining points as destinations. The function also validates and cleans input
+    if not explicitly provided, and organizes the remaining points as terminals. The function also validates and cleans input
     data for consistency.
 
     Args:
         request: Input request containing points and their associated costs
 
     Returns:
-        A tuple containing coords, destination_indices, source_idx, original_names, costs
+        A tuple containing coords, terminal_indices, source_idx, original_names, costs
     """
 
     points = request.points
@@ -434,16 +434,16 @@ def parse_input(request: OptimizationRequest):
         source_idx = 0
         names[0] = "Power Source"
 
-    destination_indices = [i for i in range(len(coords)) if i != source_idx]
+    terminal_indices = [i for i in range(len(coords)) if i != source_idx]
 
-    return coords, destination_indices, source_idx, names, costs
+    return coords, terminal_indices, source_idx, names, costs
 
 
 def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     """Compute a realistic power distribution network using MST with intermediate poles.
 
     Uses Voronoi vertices as candidate pole locations.
-    Enforces no direct destination-to-destination connections.
+    Enforces no direct terminal-to-terminal connections.
     Dynamically identifies the "Power Source" point by name.
     Returns edges, nodes, lengths, and cost estimates.
 
@@ -454,7 +454,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
         Dict[str, Any]: Result with edges, nodes, totals, costs, and debug info.
     """
     # ─── Process input ────────────────────────────────────────────────
-    coords, destination_indices, source_idx, original_names, costs = parse_input(request)
+    coords, terminal_indices, source_idx, original_names, costs = parse_input(request)
 
     debug = request.debug
 
@@ -482,7 +482,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
 
     DG = build_directed_graph_for_arborescence(
         source_idx=source_idx,
-        destination_indices=destination_indices,
+        terminal_indices=terminal_indices,
         pole_indices=pole_indices,
         dist_matrix=dist_matrix,  # you already compute this
         costs=costs,
@@ -491,7 +491,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     arbo = nx.minimum_spanning_arborescence(DG, attr="weight", preserve_attrs=True, default=1e18)
 
     # ─── Remove 0 degree poles ────────────────────────────────────────────────
-    mst = prune_dead_end_pole_branches(arbo, pole_indices, destination_indices)
+    mst = prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)
 
     # ─── Extract used nodes & name poles ────────────────────────────────────
     used_nodes = {u for u, v in mst.edges()} | {v for u, v in mst.edges()}
@@ -564,7 +564,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
                 "lat": float(extended_coords[i][0]),
                 "lng": float(extended_coords[i][1]),
                 "name": node_names.get(i, f"Unused {i}"),
-                "type": "source" if i == source_idx else "destination" if i < pole_start_idx else "pole"
+                "type": "source" if i == source_idx else "terminal" if i < pole_start_idx else "pole"
             }
             for i in sorted(used_nodes)
         ]

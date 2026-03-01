@@ -4,7 +4,6 @@ from scipy.spatial.distance import cdist
 from candidate_generation import *
 from build_graph import *
 
-
 def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     """Compute a realistic power distribution network using MST with intermediate poles.
 
@@ -28,17 +27,13 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     # candidates = generate_voronoi_candidates(coords)
     candidates = generate_fermat_candidates(coords, max_candidates=100)
 
-    # remove candidates that fall inside any building
-    # candidates = filter_candidates_by_buildings(candidates, coords)
+    pole_indices = []
+    pole_start_idx = len(coords)
+    extended_coords = coords
 
     if len(candidates) > 0:
-        extended_coords = np.vstack([coords, candidates])
-        pole_start_idx = len(coords)
+        extended_coords = np.vstack([extended_coords, candidates])
         pole_indices = list(range(pole_start_idx, len(extended_coords)))
-    else:
-        extended_coords = coords
-        pole_indices = []
-        pole_start_idx = len(coords)
 
     # ─── Build & compute MST ────────────────────────────────────────────────
     dist_matrix = cdist(

@@ -8,9 +8,12 @@ from build_graph import *
 def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     """Compute a realistic power distribution network using MST with intermediate poles.
 
-    Uses Voronoi vertices as candidate pole locations.
+    Uses Voronoi or fermat vertices as candidate pole locations.
     Enforces no direct terminal-to-terminal connections.
-    Dynamically identifies the "Power Source" point by name.
+    Generates directed graph
+    Runs minimum_spanning_arborescence on graph
+    cleans up the useless poles
+    calculate cost estimates
     Returns edges, nodes, lengths, and cost estimates.
 
     Args:
@@ -55,6 +58,7 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
         costs=costs,
     )
 
+    # Run Optimization on the directed graph from above
     arbo = nx.minimum_spanning_arborescence(DG, attr="weight", preserve_attrs=True, default=1e18)
 
     # ─── Remove 0 degree poles ────────────────────────────────────────────────

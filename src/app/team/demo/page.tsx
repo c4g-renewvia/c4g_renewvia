@@ -624,11 +624,15 @@ export default function DemoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          points: markersRef.current.map((marker) => ({
-            lat: marker.position.lat,
-            lng: marker.position.lng,
-            name: marker.title ?? null,
-          })),
+          points: markersRef.current.map((marker) => {
+            const pos = marker.position as google.maps.LatLngLiteral; // or just as { lat: number; lng: number }
+
+            return {
+              lat: pos.lat,
+              lng: pos.lng,
+              name: marker.title ?? null,
+            };
+          }),
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,

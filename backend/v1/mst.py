@@ -1,8 +1,8 @@
 # backend/mst.py
 from scipy.spatial.distance import cdist
 
-from candidate_generation import *
-from build_graph import *
+from .candidate_generation import *
+from .build_graph import *
 
 def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     """Compute a realistic power distribution network using MST with intermediate poles.

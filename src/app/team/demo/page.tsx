@@ -103,9 +103,9 @@ export default function DemoPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [poleCost, setPoleCost] = useState<number>(1000);
-  const [lowVoltageCost, setLowVoltageCost] = useState<number>(4);
-  const [highVoltageCost, setHighVoltageCost] = useState<number>(10);
+  const [poleCost, setPoleCost] = useState<number>(100);
+  const [lowVoltageCost, setLowVoltageCost] = useState<number>(10);
+  const [highVoltageCost, setHighVoltageCost] = useState<number>(20);
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
@@ -262,25 +262,25 @@ export default function DemoPage() {
         }
       });
 
-      setCostBreakdown((prev: CostBreakdown) => ({
-        ...prev,
-        lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
-        highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
-        totalLowVoltageMeters:
-          prev.totalLowVoltageMeters + diff.lowVoltageMeters,
-        totalHighVoltageMeters:
-          prev.totalHighVoltageMeters + diff.highVoltageMeters,
-        totalMeters:
-          prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
-        totalWireCost:
-          prev.totalWireCost +
-          diff.lowVoltageMeters * lowVoltageCost +
-          diff.highVoltageMeters * highVoltageCost,
-        grandTotal:
-          prev.grandTotal +
-          diff.lowVoltageMeters * lowVoltageCost +
-          diff.highVoltageMeters * highVoltageCost,
-      }));
+      setCostBreakdown((prev) => {
+        if (!prev) return prev; // safety
+
+        return {
+          ...prev,
+          lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
+          highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
+          totalMeters:
+            prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
+          wireCost:
+            prev.wireCost +
+            diff.lowVoltageMeters * lowVoltageCost +
+            diff.highVoltageMeters * highVoltageCost,
+          grandTotal:
+            prev.grandTotal +
+            diff.lowVoltageMeters * lowVoltageCost +
+            diff.highVoltageMeters * highVoltageCost,
+        };
+      });
 
       markerDragRef.current = event.latLng.lat() + ',' + event.latLng.lng();
     });
@@ -604,7 +604,8 @@ export default function DemoPage() {
     setCalcError(null);
 
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      'http://localhost:8000/optimize/v1';
 
     const startTime = performance.now();
     const debug = true;

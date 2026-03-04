@@ -4,7 +4,7 @@ import pandas as pd
 from shapely.geometry import Point
 from shapely.wkt import loads
 
-from utils import *
+from .utils import *
 
 
 # For Voronoi candidates:

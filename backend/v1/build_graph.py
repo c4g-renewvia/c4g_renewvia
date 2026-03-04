@@ -1,10 +1,10 @@
 import networkx as nx
 
 MIN_POLE_TO_TERMINAL = 10.0
-MAX_POLE_TO_TERMINAL = 100.0
+MAX_POLE_TO_TERMINAL_LV = 100.0
 
 MIN_POLE_TO_POLE = 10.0
-MAX_POLE_TO_POLE = 150.0
+MAX_POLE_TO_POLE_LV = 150.0
 
 def calculate_weight(pole_cost, unit_length_cost, distance) -> float:
     """
@@ -51,7 +51,7 @@ def build_directed_graph_for_arborescence(
     for p in pole_indices:
         for h in terminal_indices:
             d = dist_matrix[p, h]
-            if 0.1 < d <= MAX_POLE_TO_TERMINAL:
+            if 0.1 < d <= MAX_POLE_TO_TERMINAL_LV:
                 w = calculate_weight(0, low_voltage_cost_per_meter, d)
                 DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
@@ -61,16 +61,16 @@ def build_directed_graph_for_arborescence(
             p1, p2 = pole_indices[i], pole_indices[j]
             d = dist_matrix[p1, p2]
             w = calculate_weight(pole_cost, high_voltage_cost_per_meter, d)
-            if 0.1 < d <= MAX_POLE_TO_POLE:
-                DG.add_edge(p1, p2, weight=w, length=d, voltage="high")
-                DG.add_edge(p2, p1, weight=w, length=d, voltage="high")
+            if 0.1 < d <= MAX_POLE_TO_POLE_LV:
+                DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
+                DG.add_edge(p2, p1, weight=w, length=d, voltage="low")
 
     # Directed: source → poles (main trunk)
     for p in pole_indices:
         d = dist_matrix[source_idx, p]
-        if 0.1 < d <= MAX_POLE_TO_POLE:
+        if 0.1 < d <= MAX_POLE_TO_POLE_LV:
             w = calculate_weight(pole_cost, high_voltage_cost_per_meter, d)
-            DG.add_edge(source_idx, p, weight=w, length=d, voltage="high")
+            DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
 
     return DG
 

@@ -13,7 +13,7 @@ Provide a REST API for the C4G Renewvia Mini-Grid Optimization.
     - Currenlty there are 2 candidate generation methods:
       - Voronoi: Generates points based on voronoi diagram
       - Fermat: Generates points based on Fermat's Little Theorem
-  - Calls build_graph: build gragh from all coordinates and clean up optinized graph
+  - Calls build_graph: build gragh from all coordinates and clean up optimized graph
   - Optimizes the Power Pole and Line layout
   - Cleans up the Power Pole and Line results
   - returns the results

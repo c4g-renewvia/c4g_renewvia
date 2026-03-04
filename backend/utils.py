@@ -1,7 +1,6 @@
 import math
 import numpy as np
 from typing import Dict, Union, Any, List
-
 from pydantic import BaseModel
 
 
@@ -16,7 +15,6 @@ class OptimizationRequest(BaseModel):
     points: List[Dict[str, Union[float, str, None]]]
     costs: Dict[str, float]
     debug: bool = False
-
 
 def parse_input(request: OptimizationRequest):
     """
@@ -83,7 +81,10 @@ def parse_input(request: OptimizationRequest):
         source_idx = 0
         names[0] = "Power Source"
 
-    terminal_indices = [i for i in range(len(coords)) if i != source_idx]
+    # Resubmitting with alternate poles
+    terminal_indices = [i for i in range(len(coords)) if i != source_idx and "pole" not in points[i]["name"].lower()]
+    # Lazy way of removing the (terminal) | (pole) | (building) from the name
+    names = [name.split(" (")[0] for name in names]
 
     return coords, terminal_indices, source_idx, names, costs
 
@@ -91,7 +92,7 @@ def parse_input(request: OptimizationRequest):
 def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Calculate the great-circle distance between two points on Earth in meters.
 
-    Uses the Haversine formula to compute distance between two latitude/lnggitude pairs.
+    Uses the Haversine formula to compute distance between a pair of points (longitude + latitude).
 
     Args:
         lat1 (float): Latitude of the first point in degrees.
@@ -112,8 +113,10 @@ def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> floa
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-
-def haversine_vec(A, B):
+def haversine_vec(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Generate a distance matrix (meters) between two Input Vectors of Longitude, Latitude Pairs
+    """
     # A, B: (n, 2) arrays of [lat, lon]
     lat1, lon1 = np.radians(A[:, 0]), np.radians(A[:, 1])
     lat2, lon2 = np.radians(B[:, 0]), np.radians(B[:, 1])

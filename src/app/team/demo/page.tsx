@@ -202,66 +202,90 @@ export default function DemoPage() {
       gmpDraggable: true,
     });
 
-    marker.addListener('dragstart', (event: MouseEvent) => {
-      markerDragRef.current = event.latLng.lat() + ',' + event.latLng.lng();
+    // 1. Store starting position on dragstart (optional but useful for diff calculation)
+    marker.addListener('dragstart', () => {
+      const pos = marker.position;
+      if (pos) {
+        // Use LatLngLiteral form – safe whether pos is LatLng or {lat,lng}
+        const lat = 'lat' in pos ? pos.lat : pos.lat();
+        const lng = 'lng' in pos ? pos.lng : pos.lng();
+        markerDragRef.current = `${lat},${lng}`;
+      }
     });
 
-    marker.addListener('drag', (event: MouseEvent) => {
-      const latLng = markerDragRef.current;
-      const [dragLat, dragLng] = latLng.split(',').map(Number);
+    // 2. During drag – read current position from marker, not from event
+    marker.addListener('drag', () => {
+      const currentPos = marker.position;
+      if (!currentPos) return;
+
+      const curLat = 'lat' in currentPos ? currentPos.lat : currentPos.lat();
+      const curLng = 'lng' in currentPos ? currentPos.lng : currentPos.lng();
+
+      // Previous position (from dragstart or previous drag tick)
+      const prevStr = markerDragRef.current;
+      if (!prevStr) return;
+      const [prevLat, prevLng] = prevStr.split(',').map(Number);
+
       const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
+
       polylinesRef.current.forEach((line) => {
-        let prevDist = 0;
+        const path = line.getPath();
+        if (path.getLength() !== 2) return;
+
+        const start = path.getAt(0);
+        const end = path.getAt(1);
+
+        const startLat = start.lat();
+        const startLng = start.lng();
+        const endLat = end.lat();
+        const endLng = end.lng();
+
         let changed = false;
+        let prevDist = 0;
+
         const lineType =
-          line.get('strokeColor') == lowVoltageColor ? 'low' : 'high';
-        const lineStartLat = line.getPath().getAt(0).lat();
-        const lineStartLng = line.getPath().getAt(0).lng();
-        const lineEndLat = line.getPath().getAt(1).lat();
-        const lineEndLng = line.getPath().getAt(1).lng();
+          line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
 
-        if (lineStartLat === dragLat && lineStartLng === dragLng) {
-          prevDist = haversineDistance(
-            lineStartLat,
-            lineStartLng,
-            lineEndLat,
-            lineEndLng
-          );
+        if (
+          Math.abs(startLat - prevLat) < 1e-8 &&
+          Math.abs(startLng - prevLng) < 1e-8
+        ) {
+          // This line's start was being dragged
+          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
-            { lat: event.latLng.lat(), lng: event.latLng.lng() },
-            { lat: lineEndLat, lng: lineEndLng },
+            { lat: curLat, lng: curLng },
+            { lat: endLat, lng: endLng },
           ]);
-
           changed = true;
-        } else if (lineEndLat === dragLat && lineEndLng === dragLng) {
-          prevDist = haversineDistance(
-            lineStartLat,
-            lineStartLng,
-            lineEndLat,
-            lineEndLng
-          );
+        } else if (
+          Math.abs(endLat - prevLat) < 1e-8 &&
+          Math.abs(endLng - prevLng) < 1e-8
+        ) {
+          // This line's end was being dragged
+          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
-            { lat: lineStartLat, lng: lineStartLng },
-            { lat: event.latLng.lat(), lng: event.latLng.lng() },
+            { lat: startLat, lng: startLng },
+            { lat: curLat, lng: curLng },
           ]);
           changed = true;
         }
 
         if (changed) {
-          const cur_dist = haversineDistance(
-            line.getPath().getAt(1).lat(),
-            line.getPath().getAt(1).lng(),
+          const newDist = haversineDistance(
             line.getPath().getAt(0).lat(),
-            line.getPath().getAt(0).lng()
+            line.getPath().getAt(0).lng(),
+            line.getPath().getAt(1).lat(),
+            line.getPath().getAt(1).lng()
           );
           if (lineType === 'low') {
-            diff.lowVoltageMeters += cur_dist - prevDist;
+            diff.lowVoltageMeters += newDist - prevDist;
           } else {
-            diff.highVoltageMeters += cur_dist - prevDist;
+            diff.highVoltageMeters += newDist - prevDist;
           }
         }
       });
 
+      // Update cost breakdown (your existing logic – but fixed keys)
       setCostBreakdown((prev) => {
         if (!prev) return prev; // safety
 
@@ -279,41 +303,21 @@ export default function DemoPage() {
             prev.grandTotal +
             diff.lowVoltageMeters * lowVoltageCost +
             diff.highVoltageMeters * highVoltageCost,
+          // If you really have these separate total* fields – add them:
+          // totalLowVoltageMeters:  prev.totalLowVoltageMeters  + diff.lowVoltageMeters,
+          // totalHighVoltageMeters: prev.totalHighVoltageMeters + diff.highVoltageMeters,
+          // totalWireCost:          prev.totalWireCost          + ... (same as wireCost above)
         };
       });
 
-      markerDragRef.current = event.latLng.lat() + ',' + event.latLng.lng();
+      // Update ref for next tick
+      markerDragRef.current = `${curLat},${curLng}`;
     });
 
-    marker.addListener('dragend', (event: MouseEvent) => {
-      const latLng = markerDragRef.current;
-      const [startLat, startLng] = latLng.split(',').map(Number);
-      polylinesRef.current.forEach((line) => {
-        if (
-          line.getPath().getAt(0).lat() === startLat &&
-          line.getPath().getAt(0).lng() === startLng
-        ) {
-          line.setPath([
-            { lat: event.latLng.lat(), lng: event.latLng.lng() },
-            {
-              lat: line.getPath().getAt(1).lat(),
-              lng: line.getPath().getAt(1).lng(),
-            },
-          ]);
-        } else if (
-          line.getPath().getAt(1).lat() === startLat &&
-          line.getPath().getAt(1).lng() === startLng
-        ) {
-          line.setPath([
-            { lat: event.latLng.lat(), lng: event.latLng.lng() },
-            {
-              lat: line.getPath().getAt(0).lat(),
-              lng: line.getPath().getAt(0).lng(),
-            },
-          ]);
-        }
-      });
+    // 3. On dragend – finalize (optional cleanup)
+    marker.addListener('dragend', () => {
       markerDragRef.current = null;
+      // Optional: force one last cost recalc if needed, or just let 'drag' handle it
     });
 
     return marker;

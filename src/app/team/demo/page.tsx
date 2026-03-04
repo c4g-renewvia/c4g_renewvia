@@ -738,72 +738,169 @@ export default function DemoPage() {
     setHighVoltageCost(highVoltageCost);
   };
 
-  const downloadNodesCsv = () => {
-    if (mstNodes.length === 0) return;
+  const downloadKml = () => {
+    if (mstNodes.length === 0 || mstEdges.length === 0) return;
 
-    // Define CSV headers and order
-    const headers = ['index', 'name', 'type', 'lat', 'lng'];
+    const escapeXml = (str: string) =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
 
-    const rows = mstNodes.map((node) => [
-      node.index,
-      node.name,
-      node.type,
-      node.lat.toFixed(8),
-      node.lng.toFixed(8),
-    ]);
+    const formatCost = (v: number) =>
+      v.toLocaleString(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.join(',')),
-    ].join('\n');
+    const kmlStyles = `
+    <Style id="source">
+      <IconStyle><color>ff00cc00</color><scale>1.5</scale></IconStyle>
+      <LabelStyle><color>ff00ff00</color><scale>1.1</scale></LabelStyle>
+    </Style>
+    <Style id="terminal">
+      <IconStyle><color>ff3366ff</color><scale>1.3</scale></IconStyle>
+      <LabelStyle><scale>1.0</scale></LabelStyle>
+    </Style>
+    <Style id="pole">
+      <IconStyle><color>ffffff66</color><scale>1.1</scale></IconStyle>
+      <LabelStyle><color>ffffffff</color><scale>0.85</scale></LabelStyle>
+    </Style>
+    <Style id="lowVoltage">
+      <LineStyle><color>aa3b82f6</color><width>5</width></LineStyle>
+    </Style>
+    <Style id="highVoltage">
+      <LineStyle><color>aa8b5cf6</color><width>7</width></LineStyle>
+    </Style>
+    <Style id="summary">
+      <BalloonStyle>
+        <text><![CDATA[<h3>$[name]</h3><p>$[description]</p>]]></text>
+      </BalloonStyle>
+    </Style>
+  `;
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    // Nodes
+    let nodesKml = '';
+    mstNodes.forEach((node) => {
+      const styleId =
+        node.type === 'source'
+          ? 'source'
+          : node.type === 'terminal'
+            ? 'terminal'
+            : 'pole';
+      const displayName =
+        node.type === 'pole'
+          ? `Pole ${String(node.index).padStart(3, '0')}`
+          : escapeXml(node.name);
+
+      nodesKml += `
+      <Placemark>
+        <name>${displayName}</name>
+        <styleUrl>#${styleId}</styleUrl>
+        <description><![CDATA[
+          <b>${escapeXml(node.name)}</b><br/>
+          Type: ${node.type}<br/>
+          Index: ${node.index}<br/>
+          Lat,Lng: ${node.lat.toFixed(7)}, ${node.lng.toFixed(7)}
+        ]]></description>
+        <Point>
+          <coordinates>${node.lng.toFixed(8)},${node.lat.toFixed(8)},0</coordinates>
+        </Point>
+      </Placemark>`;
+    });
+
+    // Edges
+    let linesKml = '';
+    mstEdges.forEach((edge, i) => {
+      const styleId = edge.voltage === 'high' ? 'highVoltage' : 'lowVoltage';
+      const lengthM = Math.round(edge.lengthMeters);
+      const costPerM =
+        edge.voltage === 'high' ? highVoltageCost : lowVoltageCost;
+      const edgeCost = Math.round(lengthM * costPerM);
+
+      linesKml += `
+      <Placemark>
+        <name>Line ${i + 1} (${edge.voltage})</name>
+        <styleUrl>#${styleId}</styleUrl>
+        <description><![CDATA[
+          <b>Segment ${i + 1}</b><br/>
+          Voltage: ${edge.voltage}<br/>
+          Length: ${lengthM.toLocaleString()} m<br/>
+          Est. cost: ${formatCost(edgeCost)}
+        ]]></description>
+        <LineString>
+          <tessellate>1</tessellate>
+          <coordinates>
+            ${edge.start.lng.toFixed(8)},${edge.start.lat.toFixed(8)},0
+            ${edge.end.lng.toFixed(8)},${edge.end.lat.toFixed(8)},0
+          </coordinates>
+        </LineString>
+      </Placemark>`;
+    });
+
+    // Summary
+    const summaryDescription = costBreakdown
+      ? `
+    <b>Grand Total:</b> ${formatCost(costBreakdown.grandTotal)}<br/>
+    <b>Wire:</b> ${formatCost(costBreakdown.wireCost)}<br/>
+      • Low: ${formatMeters(costBreakdown.lowVoltageMeters)} m → ${formatCost(costBreakdown.lowWireCost)}<br/>
+      • High: ${formatMeters(costBreakdown.highVoltageMeters)} m → ${formatCost(costBreakdown.highWireCost)}<br/>
+    <b>Poles:</b> ${costBreakdown.poleCount} × ${formatCost(costBreakdown.usedPoleCost ?? poleCost)}<br/>
+    <br/>Nodes: ${mstNodes.length} • Segments: ${mstEdges.length}
+  `
+      : 'No cost data available';
+
+    const summaryPlacemark = `
+    <Placemark>
+      <name>Mini-Grid Cost Summary</name>
+      <styleUrl>#summary</styleUrl>
+      <description><![CDATA[${summaryDescription}]]></description>
+      <Point><coordinates>0,0,0</coordinates></Point>
+    </Placemark>
+  `;
+
+    // Assemble final KML
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Mini-Grid • ${fileName || 'Optimized Network'}</name>
+    <open>1</open>
+
+    ${kmlStyles}
+
+    <Folder>
+      <name>Nodes and Poles</name>
+      <open>1</open>
+      ${nodesKml}
+    </Folder>
+
+    <Folder>
+      <name>Power Lines</name>
+      <open>1</open>
+      ${linesKml}
+    </Folder>
+
+    <Folder>
+      <name>Summary</name>
+      ${summaryPlacemark}
+    </Folder>
+
+  </Document>
+</kml>`;
+
+    // Download
+    const blob = new Blob([kml], {
+      type: 'application/vnd.google-earth.kml+xml',
+    });
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'mst_nodes.csv');
-    document.body.appendChild(link);
+    link.download = `minigrid_${new Date().toISOString().slice(0, 10)}.kml`;
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const downloadEdgesCsv = () => {
-    if (mstEdges.length === 0) return;
-
-    const headers = [
-      'start_lat',
-      'start_lng',
-      'end_lat',
-      'end_lng',
-      'length_meters',
-      'voltage',
-    ];
-
-    const rows = mstEdges.map((edge) => [
-      edge.start.lat.toFixed(8),
-      edge.start.lng.toFixed(8),
-      edge.end.lat.toFixed(8),
-      edge.end.lng.toFixed(8),
-      Math.round(edge.lengthMeters), // or keep decimals: edge.lengthMeters.toFixed(2)
-      edge.voltage,
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.join(',')),
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'mst_edges.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
@@ -1165,7 +1262,6 @@ export default function DemoPage() {
         </section>
       )}
 
-      {/* Download Data Buttons */}
       {costBreakdown && mstNodes.length > 0 && (
         <section className='mx-auto max-w-7xl px-6 py-12'>
           <div className='mx-auto mt-8 max-w-2xl rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
@@ -1175,19 +1271,11 @@ export default function DemoPage() {
 
             <div className='flex flex-col justify-center gap-5 sm:flex-row'>
               <button
-                onClick={downloadNodesCsv}
-                className='flex-1 rounded bg-emerald-600 px-10 py-4 text-center font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
-                disabled={mstNodes.length === 0}
+                onClick={downloadKml}
+                className='flex-1 rounded bg-purple-600 px-10 py-4 text-center font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
+                disabled={mstNodes.length === 0 || mstEdges.length === 0}
               >
-                Download Nodes CSV
-              </button>
-
-              <button
-                onClick={downloadEdgesCsv}
-                className='flex-1 rounded bg-blue-600 px-10 py-4 text-center font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
-                disabled={mstEdges.length === 0}
-              >
-                Download Edges CSV
+                Download KML (Google Earth)
               </button>
             </div>
           </div>

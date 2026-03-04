@@ -7,6 +7,26 @@ import Papa from 'papaparse';
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
+function toLiteral(
+  pos: google.maps.marker.AdvancedMarkerElement['position']
+): google.maps.LatLngLiteral | null {
+  if (!pos) return null;
+
+  if (typeof pos.lat === 'function' && typeof pos.lng === 'function') {
+    // It's a LatLng / LatLngAltitude instance
+    return {
+      lat: pos.lat(),
+      lng: pos.lng(),
+    };
+  }
+
+  // Already a literal
+  return {
+    lat: pos.lat as number,
+    lng: pos.lng as number,
+  };
+}
+
 const haversineDistance = (
   lat1: number,
   lon1: number,
@@ -202,26 +222,21 @@ export default function DemoPage() {
       gmpDraggable: true,
     });
 
-    // 1. Store starting position on dragstart (optional but useful for diff calculation)
     marker.addListener('dragstart', () => {
-      const pos = marker.position;
-      if (pos) {
-        // Use LatLngLiteral form – safe whether pos is LatLng or {lat,lng}
-        const lat = 'lat' in pos ? pos.lat : pos.lat();
-        const lng = 'lng' in pos ? pos.lng : pos.lng();
-        markerDragRef.current = `${lat},${lng}`;
+      const literal = toLiteral(marker.position);
+      if (literal) {
+        markerDragRef.current = `${literal.lat},${literal.lng}`;
       }
     });
 
-    // 2. During drag – read current position from marker, not from event
+    // drag
     marker.addListener('drag', () => {
-      const currentPos = marker.position;
-      if (!currentPos) return;
+      const current = toLiteral(marker.position);
+      if (!current) return;
 
-      const curLat = 'lat' in currentPos ? currentPos.lat : currentPos.lat();
-      const curLng = 'lng' in currentPos ? currentPos.lng : currentPos.lng();
+      const curLat = current.lat; // now definitely number
+      const curLng = current.lng;
 
-      // Previous position (from dragstart or previous drag tick)
       const prevStr = markerDragRef.current;
       if (!prevStr) return;
       const [prevLat, prevLng] = prevStr.split(',').map(Number);
@@ -235,7 +250,7 @@ export default function DemoPage() {
         const start = path.getAt(0);
         const end = path.getAt(1);
 
-        const startLat = start.lat();
+        const startLat = start.lat(); // classic LatLng → method
         const startLng = start.lng();
         const endLat = end.lat();
         const endLng = end.lng();
@@ -247,21 +262,19 @@ export default function DemoPage() {
           line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
 
         if (
-          Math.abs(startLat - prevLat) < 1e-8 &&
-          Math.abs(startLng - prevLng) < 1e-8
+          Math.abs(startLat - prevLat) < 1e-9 &&
+          Math.abs(startLng - prevLng) < 1e-9
         ) {
-          // This line's start was being dragged
           prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
-            { lat: curLat, lng: curLng },
+            { lat: curLat, lng: curLng }, // now safe: numbers
             { lat: endLat, lng: endLng },
           ]);
           changed = true;
         } else if (
-          Math.abs(endLat - prevLat) < 1e-8 &&
-          Math.abs(endLng - prevLng) < 1e-8
+          Math.abs(endLat - prevLat) < 1e-9 &&
+          Math.abs(endLng - prevLng) < 1e-9
         ) {
-          // This line's end was being dragged
           prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
             { lat: startLat, lng: startLng },
@@ -285,10 +298,8 @@ export default function DemoPage() {
         }
       });
 
-      // Update cost breakdown (your existing logic – but fixed keys)
       setCostBreakdown((prev) => {
-        if (!prev) return prev; // safety
-
+        if (!prev) return prev;
         return {
           ...prev,
           lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
@@ -303,21 +314,15 @@ export default function DemoPage() {
             prev.grandTotal +
             diff.lowVoltageMeters * lowVoltageCost +
             diff.highVoltageMeters * highVoltageCost,
-          // If you really have these separate total* fields – add them:
-          // totalLowVoltageMeters:  prev.totalLowVoltageMeters  + diff.lowVoltageMeters,
-          // totalHighVoltageMeters: prev.totalHighVoltageMeters + diff.highVoltageMeters,
-          // totalWireCost:          prev.totalWireCost          + ... (same as wireCost above)
         };
       });
 
-      // Update ref for next tick
       markerDragRef.current = `${curLat},${curLng}`;
     });
 
-    // 3. On dragend – finalize (optional cleanup)
+    // dragend remains the same
     marker.addListener('dragend', () => {
       markerDragRef.current = null;
-      // Optional: force one last cost recalc if needed, or just let 'drag' handle it
     });
 
     return marker;
@@ -1013,7 +1018,8 @@ export default function DemoPage() {
           </button>
 
           <p className='mt-4 text-center text-sm text-zinc-500'>
-            In beta testing until April 26th 2026.
+            Note: In Development - In beta until April 26th 2026. Only Low
+            Voltage
           </p>
 
           {calculationResult && (

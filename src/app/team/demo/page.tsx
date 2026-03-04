@@ -7,6 +7,35 @@ import Papa from 'papaparse';
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
+const haversineDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) => {
+  const R = 6371e3; // Radius of the Earth in kilometers
+
+  // Function to convert degrees to radians
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI / 180);
+  };
+
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2); // The Haversine formula part 'a'
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Angular distance 'c'
+
+  const distance = R * c; // Distance 'd' = R * c
+  return distance;
+};
+
 const formatMeters = (m: number) =>
   m.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const formatUSD = (v: number) =>
@@ -14,6 +43,9 @@ const formatUSD = (v: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+const highVoltageColor = '#8B5CF6';
+const lowVoltageColor = '#3B82F6';
 
 interface LocationPoint {
   name: string;
@@ -62,7 +94,8 @@ export default function DemoPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const markerDragRef = useRef<string>(null);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
   const [mstNodes, setMstNodes] = useState<MSTNode[]>([]);
@@ -70,7 +103,6 @@ export default function DemoPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
   const [poleCost, setPoleCost] = useState<number>(1000);
   const [lowVoltageCost, setLowVoltageCost] = useState<number>(4);
   const [highVoltageCost, setHighVoltageCost] = useState<number>(10);
@@ -93,6 +125,7 @@ export default function DemoPage() {
       mapTypeId: 'satellite' as google.maps.MapTypeId,
       fullscreenControl: false,
       streetViewControl: false,
+      mapId: 'DEMO_MAP_ID', // Required for AdvancedMarkerElement
     });
 
     setMap(googleMap);
@@ -139,18 +172,148 @@ export default function DemoPage() {
         iconUrl += 'red-dot.png';
     }
 
-    const marker = new google.maps.Marker({
+    // Create custom content for AdvancedMarkerElement
+    const content = document.createElement('div');
+    content.style.display = 'flex';
+    content.style.flexDirection = 'column';
+    content.style.alignItems = 'center';
+    content.style.position = 'relative';
+
+    const iconImg = document.createElement('img');
+    iconImg.src = iconUrl;
+    iconImg.style.width = `${scaledSize.width}px`;
+    iconImg.style.height = `${scaledSize.height}px`;
+    content.appendChild(iconImg);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = point.name;
+    labelSpan.style.color = labelColor;
+    labelSpan.style.fontSize = fontSize;
+    labelSpan.style.fontWeight = 'bold';
+    labelSpan.style.textShadow = '0 0 2px black'; // Better visibility on satellite map
+    labelSpan.style.marginTop = '2px';
+    content.appendChild(labelSpan);
+
+    const marker = new google.maps.marker.AdvancedMarkerElement({
       position: { lat: point.lat, lng: point.lng },
       map,
-      label: {
-        text: point.name,
-        color: labelColor,
-        fontSize,
-        fontWeight: 'bold',
-      },
-      icon: { url: iconUrl, scaledSize },
+      content,
       title: point.type ? `${point.name} (${point.type})` : point.name,
-      optimized: !!point.type, // optional: can use later if needed
+      gmpDraggable: true,
+    });
+
+    marker.addListener('dragstart', (event: MouseEvent) => {
+      markerDragRef.current = event.latLng.lat() + ',' + event.latLng.lng();
+    });
+
+    marker.addListener('drag', (event: MouseEvent) => {
+      const latLng = markerDragRef.current;
+      const [dragLat, dragLng] = latLng.split(',').map(Number);
+      const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
+      polylinesRef.current.forEach((line) => {
+        let prevDist = 0;
+        let changed = false;
+        const lineType =
+          line.get('strokeColor') == lowVoltageColor ? 'low' : 'high';
+        const lineStartLat = line.getPath().getAt(0).lat();
+        const lineStartLng = line.getPath().getAt(0).lng();
+        const lineEndLat = line.getPath().getAt(1).lat();
+        const lineEndLng = line.getPath().getAt(1).lng();
+
+        if (lineStartLat === dragLat && lineStartLng === dragLng) {
+          prevDist = haversineDistance(
+            lineStartLat,
+            lineStartLng,
+            lineEndLat,
+            lineEndLng
+          );
+          line.setPath([
+            { lat: event.latLng.lat(), lng: event.latLng.lng() },
+            { lat: lineEndLat, lng: lineEndLng },
+          ]);
+
+          changed = true;
+        } else if (lineEndLat === dragLat && lineEndLng === dragLng) {
+          prevDist = haversineDistance(
+            lineStartLat,
+            lineStartLng,
+            lineEndLat,
+            lineEndLng
+          );
+          line.setPath([
+            { lat: lineStartLat, lng: lineStartLng },
+            { lat: event.latLng.lat(), lng: event.latLng.lng() },
+          ]);
+          changed = true;
+        }
+
+        if (changed) {
+          const cur_dist = haversineDistance(
+            line.getPath().getAt(1).lat(),
+            line.getPath().getAt(1).lng(),
+            line.getPath().getAt(0).lat(),
+            line.getPath().getAt(0).lng()
+          );
+          if (lineType === 'low') {
+            diff.lowVoltageMeters += cur_dist - prevDist;
+          } else {
+            diff.highVoltageMeters += cur_dist - prevDist;
+          }
+        }
+      });
+
+      setCostBreakdown((prev: CostBreakdown) => ({
+        ...prev,
+        lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
+        highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
+        totalLowVoltageMeters:
+          prev.totalLowVoltageMeters + diff.lowVoltageMeters,
+        totalHighVoltageMeters:
+          prev.totalHighVoltageMeters + diff.highVoltageMeters,
+        totalMeters:
+          prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
+        totalWireCost:
+          prev.totalWireCost +
+          diff.lowVoltageMeters * lowVoltageCost +
+          diff.highVoltageMeters * highVoltageCost,
+        grandTotal:
+          prev.grandTotal +
+          diff.lowVoltageMeters * lowVoltageCost +
+          diff.highVoltageMeters * highVoltageCost,
+      }));
+
+      markerDragRef.current = event.latLng.lat() + ',' + event.latLng.lng();
+    });
+
+    marker.addListener('dragend', (event: MouseEvent) => {
+      const latLng = markerDragRef.current;
+      const [startLat, startLng] = latLng.split(',').map(Number);
+      polylinesRef.current.forEach((line) => {
+        if (
+          line.getPath().getAt(0).lat() === startLat &&
+          line.getPath().getAt(0).lng() === startLng
+        ) {
+          line.setPath([
+            { lat: event.latLng.lat(), lng: event.latLng.lng() },
+            {
+              lat: line.getPath().getAt(1).lat(),
+              lng: line.getPath().getAt(1).lng(),
+            },
+          ]);
+        } else if (
+          line.getPath().getAt(1).lat() === startLat &&
+          line.getPath().getAt(1).lng() === startLng
+        ) {
+          line.setPath([
+            { lat: event.latLng.lat(), lng: event.latLng.lng() },
+            {
+              lat: line.getPath().getAt(0).lat(),
+              lng: line.getPath().getAt(0).lng(),
+            },
+          ]);
+        }
+      });
+      markerDragRef.current = null;
     });
 
     return marker;
@@ -162,7 +325,7 @@ export default function DemoPage() {
     if (!map) return;
 
     // 1. Clear all previous markers
-    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current.forEach((marker) => (marker.map = null));
     markersRef.current = [];
 
     // 2. Choose which dataset to display
@@ -205,7 +368,8 @@ export default function DemoPage() {
     mstEdges.forEach((edge) => {
       if (!edge?.start || !edge?.end) return;
 
-      const color = edge.voltage === 'high' ? '#8B5CF6' : '#3B82F6'; // purple high, blue low
+      const color =
+        edge.voltage === 'high' ? highVoltageColor : lowVoltageColor;
       const weight = edge.voltage === 'high' ? 6 : 4;
 
       const polyline = new google.maps.Polyline({
@@ -226,7 +390,7 @@ export default function DemoPage() {
     if (!map) return;
 
     // Clear previous markers
-    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current.forEach((m) => (m.map = null));
     markersRef.current = [];
 
     const bounds = new google.maps.LatLngBounds();
@@ -450,10 +614,10 @@ export default function DemoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          points: dataPoints.map((p) => ({
-            lat: p.lat,
-            lng: p.lng,
-            name: p.name ?? null,
+          points: markersRef.current.map((marker) => ({
+            lat: marker.position.lat,
+            lng: marker.position.lng,
+            name: marker.title ?? null,
           })),
           costs: {
             poleCost: poleCost || 0,
@@ -932,7 +1096,7 @@ export default function DemoPage() {
 
         {/* Script loader */}
         <Script
-          src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`}
+          src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=marker`}
           strategy='afterInteractive'
           onLoad={initMap}
         />

@@ -27,8 +27,8 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
     # candidates = generate_voronoi_candidates(coords)
     candidates = generate_fermat_candidates(coords, max_candidates=100)
 
-    pole_indices = []
     pole_start_idx = len(coords)
+    pole_indices = [i for i in range(pole_start_idx) if i not in terminal_indices and i != source_idx]
     extended_coords = coords
 
     if len(candidates) > 0:
@@ -79,12 +79,12 @@ def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
             "start": {
                 "lat": float(extended_coords[u][0]),
                 "lng": float(extended_coords[u][1]),
-                "name": start_name
+                "name": start_name,
             },
             "end": {
                 "lat": float(extended_coords[v][0]),
                 "lng": float(extended_coords[v][1]),
-                "name": end_name
+                "name": end_name,
             },
             "lengthMeters": round(length_m, 2),
             "voltage": voltage,

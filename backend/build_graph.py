@@ -10,7 +10,7 @@ def calculate_weight(pole_cost, unit_length_cost, distance) -> float:
     """
     Calculate the weight of an edge based on the cost of the pole and the unit length cost.
     """
-    return distance * unit_length_cost + pole_cost
+    return pole_cost + (distance * unit_length_cost)
 
 def build_directed_graph_for_arborescence(
         source_idx,

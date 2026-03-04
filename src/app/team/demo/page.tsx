@@ -1275,7 +1275,7 @@ export default function DemoPage() {
                 className='flex-1 rounded bg-purple-600 px-10 py-4 text-center font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
                 disabled={mstNodes.length === 0 || mstEdges.length === 0}
               >
-                Download KML (Google Earth)
+                Download KML
               </button>
             </div>
           </div>

@@ -1,7 +1,58 @@
 import math
+from typing import List, Dict, Any, Optional, Literal
+from typing import Union
+
 import numpy as np
-from typing import Dict, Union, Any, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
+
+
+class Node(BaseModel):
+    """
+    Unified representation of any point in the network:
+    source, terminal, or intermediate pole.
+    """
+    index: int
+    lat: float
+    lng: float
+    type: Literal["source", "terminal", "pole"]
+    name: Optional[str] = None
+    is_candidate: bool = False
+    used: bool = False
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=False,  # we will mutate 'used' and 'name' during processing
+    )
+
+    @property
+    def coord_tuple(self) -> tuple[float, float]:
+        return (self.lat, self.lng)
+
+
+class OutputEdge(BaseModel):
+    start: Dict[str, Any]  # will contain lat, lng, name, type
+    end: Dict[str, Any]
+    lengthMeters: float = Field(..., ge=0)
+    voltage: Literal["low", "high", "unknown"] = "unknown"
+
+
+class OptimizationResult(BaseModel):
+    edges: List[OutputEdge]
+    nodes: List[Dict[str, Any]]  # minimal dicts for frontend (lat,lng,name,type,index,...)
+    totalLowVoltageMeters: float = 0.0
+    totalHighVoltageMeters: float = 0.0
+    numPolesUsed: int = 0
+    poleCostEstimate: float = 0.0
+    lowWireCostEstimate: float = 0.0
+    highWireCostEstimate: float = 0.0
+    totalWireCostEstimate: float = 0.0
+    totalCostEstimate: float = 0.0
+
+    debug: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class OptimizationRequest(BaseModel):
@@ -15,6 +66,7 @@ class OptimizationRequest(BaseModel):
     points: List[Dict[str, Union[float, str, None]]]
     costs: Dict[str, float]
     debug: bool = False
+
 
 def parse_input(request: OptimizationRequest):
     """
@@ -81,10 +133,7 @@ def parse_input(request: OptimizationRequest):
         source_idx = 0
         names[0] = "Power Source"
 
-    # Resubmitting with alternate poles
-    terminal_indices = [i for i in range(len(coords)) if i != source_idx and "pole" not in points[i]["name"].lower()]
-    # Lazy way of removing the (terminal) | (pole) | (building) from the name
-    names = [name.split(" (")[0] for name in names]
+    terminal_indices = [i for i in range(len(coords)) if i != source_idx]
 
     return coords, terminal_indices, source_idx, names, costs
 
@@ -92,7 +141,7 @@ def parse_input(request: OptimizationRequest):
 def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Calculate the great-circle distance between two points on Earth in meters.
 
-    Uses the Haversine formula to compute distance between a pair of points (longitude + latitude).
+    Uses the Haversine formula to compute distance between two latitude/lnggitude pairs.
 
     Args:
         lat1 (float): Latitude of the first point in degrees.
@@ -113,10 +162,8 @@ def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> floa
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def haversine_vec(A: np.ndarray, B: np.ndarray) -> np.ndarray:
-    """
-    Generate a distance matrix (meters) between two Input Vectors of Longitude, Latitude Pairs
-    """
+
+def haversine_vec(A, B):
     # A, B: (n, 2) arrays of [lat, lon]
     lat1, lon1 = np.radians(A[:, 0]), np.radians(A[:, 1])
     lat2, lon2 = np.radians(B[:, 0]), np.radians(B[:, 1])

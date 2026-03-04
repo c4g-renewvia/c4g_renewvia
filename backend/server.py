@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from mst import compute_mst, OptimizationRequest
+from v1.mst import compute_mst, OptimizationRequest
 
 app = FastAPI(title="Renewvia MST Optimizer")
 
@@ -10,14 +10,14 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:8000",
-        "https://c4g-renewvia.vercel.app",  # ← replace with your real domain
+        "https://c4g-renewvia.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.post("/optimize")
+@app.post("/optimize/v1")
 async def optimize(request: OptimizationRequest):
     if len(request.points) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 points")

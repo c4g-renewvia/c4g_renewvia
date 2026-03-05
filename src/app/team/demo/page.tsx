@@ -3,74 +3,19 @@
 import React, { useEffect, useRef, useState, ChangeEvent } from 'react';
 import Script from 'next/script';
 import Papa from 'papaparse';
-import { useSession } from 'next-auth/react';
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
-
-function toLiteral(
-  pos: google.maps.marker.AdvancedMarkerElement['position']
-): google.maps.LatLngLiteral | null {
-  if (!pos) return null;
-
-  if (typeof pos.lat === 'function' && typeof pos.lng === 'function') {
-    // It's a LatLng / LatLngAltitude instance
-    return {
-      lat: pos.lat(),
-      lng: pos.lng(),
-    };
-  }
-
-  // Already a literal
-  return {
-    lat: pos.lat as number,
-    lng: pos.lng as number,
-  };
-}
-
-const haversineDistance = (
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-) => {
-  const R = 6371e3; // Radius of the Earth in kilometers
-
-  // Function to convert degrees to radians
-  const deg2rad = (deg: number) => {
-    return deg * (Math.PI / 180);
-  };
-
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) *
-      Math.cos(deg2rad(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2); // The Haversine formula part 'a'
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Angular distance 'c'
-
-  const distance = R * c; // Distance 'd' = R * c
-  return distance;
-};
-
-interface MiniGridRun {
-  id: string;
-  name?: string;
-  createdAt: string; // or Date if you convert it
-  fileName?: string | null;
-  dataPoints: LocationPoint[];
-  mstNodes: MSTNode[];
-  mstEdges: MSTEdge[];
-  costBreakdown?: CostBreakdown | null;
-  poleCost: number;
-  lowVoltageCost: number;
-  highVoltageCost: number;
-  // add any other fields you actually use from the API
-}
 
 const formatMeters = (m: number) =>
   m.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -80,12 +25,8 @@ const formatUSD = (v: number) =>
     maximumFractionDigits: 2,
   });
 
-const highVoltageColor = '#8B5CF6';
-const lowVoltageColor = '#3B82F6';
-
 interface LocationPoint {
   name: string;
-  type: 'source' | 'terminal' | 'pole';
   lat: number;
   lng: number;
 }
@@ -102,7 +43,7 @@ interface MSTNode {
   lat: number;
   lng: number;
   name: string;
-  type: 'source' | 'terminal' | 'pole';
+  type: 'source' | 'building' | 'pole';
 }
 
 interface CostBreakdown {
@@ -130,8 +71,7 @@ export default function DemoPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  const markerDragRef = useRef<string>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
   const [mstNodes, setMstNodes] = useState<MSTNode[]>([]);
@@ -139,22 +79,18 @@ export default function DemoPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [poleCost, setPoleCost] = useState<number>(100);
-  const [lowVoltageCost, setLowVoltageCost] = useState<number>(10);
-  const [highVoltageCost, setHighVoltageCost] = useState<number>(20);
+
+  const [poleCost, setPoleCost] = useState<number>(1000);
+  const [lowVoltageCost, setLowVoltageCost] = useState<number>(4);
+  const [highVoltageCost, setHighVoltageCost] = useState<number>(10);
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
-
-  const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
-  const [loadingSaved, setLoadingSaved] = useState(false);
 
   const [costBreakdown, setCostBreakdown] = useState<CostBreakdown | null>(
     null
   );
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
-
-  const { data: session } = useSession();
 
   // Initialize map once Google Maps script loads
   const initMap = () => {
@@ -166,228 +102,104 @@ export default function DemoPage() {
       mapTypeId: 'satellite' as google.maps.MapTypeId,
       fullscreenControl: false,
       streetViewControl: false,
-      mapId: 'DEMO_MAP_ID', // Required for AdvancedMarkerElement
     });
 
     setMap(googleMap);
   };
 
-  // Helper to create a consistent marker for any point/node
-  const createMarker = (
-    point: {
-      lat: number;
-      lng: number;
-      name: string;
-      type?: 'source' | 'terminal' | 'pole';
-    },
-    map: google.maps.Map
-  ) => {
-    const type = point.type || 'terminal'; // raw uploaded points → treat as 'terminal'
-
-    let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
-    let labelColor = 'white';
-    let scaledSize = new google.maps.Size(36, 36);
-    let fontSize = '13px';
-
-    switch (type) {
-      case 'source':
-        iconUrl += 'green-dot.png';
-        labelColor = '#00ff00'; // bright green
-        scaledSize = new google.maps.Size(44, 44);
-        break;
-
-      case 'terminal':
-        iconUrl += 'blue-dot.png';
-        labelColor = 'white';
-        // keep default size
-        break;
-
-      case 'pole':
-        iconUrl += 'yellow-dot.png';
-        scaledSize = new google.maps.Size(28, 28);
-        fontSize = '11px';
-        labelColor = '#ffff99'; // light yellow for visibility
-        break;
-
-      default:
-        iconUrl += 'red-dot.png';
-    }
-
-    // Create custom content for AdvancedMarkerElement
-    const content = document.createElement('div');
-    content.style.display = 'flex';
-    content.style.flexDirection = 'column';
-    content.style.alignItems = 'center';
-    content.style.position = 'relative';
-
-    const iconImg = document.createElement('img');
-    iconImg.src = iconUrl;
-    iconImg.style.width = `${scaledSize.width}px`;
-    iconImg.style.height = `${scaledSize.height}px`;
-    content.appendChild(iconImg);
-
-    const labelSpan = document.createElement('span');
-    labelSpan.textContent = point.name;
-    labelSpan.style.color = labelColor;
-    labelSpan.style.fontSize = fontSize;
-    labelSpan.style.fontWeight = 'bold';
-    labelSpan.style.textShadow = '0 0 2px black'; // Better visibility on satellite map
-    labelSpan.style.marginTop = '2px';
-    content.appendChild(labelSpan);
-
-    const marker = new google.maps.marker.AdvancedMarkerElement({
-      position: { lat: point.lat, lng: point.lng },
-      map,
-      content,
-      title: point.type ? `${point.name} (${point.type})` : point.name,
-      gmpDraggable: true,
-    });
-
-    marker.addListener('dragstart', () => {
-      const literal = toLiteral(marker.position);
-      if (literal) {
-        markerDragRef.current = `${literal.lat},${literal.lng}`;
-      }
-    });
-
-    // drag
-    marker.addListener('drag', () => {
-      const current = toLiteral(marker.position);
-      if (!current) return;
-
-      const curLat = current.lat; // now definitely number
-      const curLng = current.lng;
-
-      const prevStr = markerDragRef.current;
-      if (!prevStr) return;
-      const [prevLat, prevLng] = prevStr.split(',').map(Number);
-
-      const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
-
-      polylinesRef.current.forEach((line) => {
-        const path = line.getPath();
-        if (path.getLength() !== 2) return;
-
-        const start = path.getAt(0);
-        const end = path.getAt(1);
-
-        const startLat = start.lat(); // classic LatLng → method
-        const startLng = start.lng();
-        const endLat = end.lat();
-        const endLng = end.lng();
-
-        let changed = false;
-        let prevDist = 0;
-
-        const lineType =
-          line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
-
-        if (
-          Math.abs(startLat - prevLat) < 1e-9 &&
-          Math.abs(startLng - prevLng) < 1e-9
-        ) {
-          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
-          line.setPath([
-            { lat: curLat, lng: curLng }, // now safe: numbers
-            { lat: endLat, lng: endLng },
-          ]);
-          changed = true;
-        } else if (
-          Math.abs(endLat - prevLat) < 1e-9 &&
-          Math.abs(endLng - prevLng) < 1e-9
-        ) {
-          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
-          line.setPath([
-            { lat: startLat, lng: startLng },
-            { lat: curLat, lng: curLng },
-          ]);
-          changed = true;
-        }
-
-        if (changed) {
-          const newDist = haversineDistance(
-            line.getPath().getAt(0).lat(),
-            line.getPath().getAt(0).lng(),
-            line.getPath().getAt(1).lat(),
-            line.getPath().getAt(1).lng()
-          );
-          if (lineType === 'low') {
-            diff.lowVoltageMeters += newDist - prevDist;
-          } else {
-            diff.highVoltageMeters += newDist - prevDist;
-          }
-        }
-      });
-
-      setCostBreakdown((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
-          highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
-          totalMeters:
-            prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
-          wireCost:
-            prev.wireCost +
-            diff.lowVoltageMeters * lowVoltageCost +
-            diff.highVoltageMeters * highVoltageCost,
-          grandTotal:
-            prev.grandTotal +
-            diff.lowVoltageMeters * lowVoltageCost +
-            diff.highVoltageMeters * highVoltageCost,
-        };
-      });
-
-      markerDragRef.current = `${curLat},${curLng}`;
-    });
-
-    // dragend remains the same
-    marker.addListener('dragend', () => {
-      markerDragRef.current = null;
-    });
-
-    return marker;
-  };
-
   // Add markers and fit bounds whenever dataPoints or map changes
-  // Optimized Markers useEffect – single unified logic
+  // Effect 1: Draw / update markers (runs when dataPoints or map changes)
   useEffect(() => {
     if (!map) return;
 
-    // 1. Clear all previous markers
-    markersRef.current.forEach((marker) => (marker.map = null));
+    // Clear old markers
+    markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
-
-    // 2. Choose which dataset to display
-    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
-
-    if (pointsToShow.length === 0) return;
 
     const bounds = new google.maps.LatLngBounds();
     let hasValidPoints = false;
 
-    // 3. Create markers + extend bounds
-    pointsToShow.forEach((point) => {
-      if (isNaN(point.lat) || isNaN(point.lng)) {
-        return;
-      }
+    // Case 1: Show raw uploaded points if no MST result yet
+    if (mstNodes.length === 0 && dataPoints.length > 0) {
+      dataPoints.forEach((point) => {
+        if (isNaN(point.lat) || isNaN(point.lng)) return;
+        hasValidPoints = true;
 
+        const marker = new google.maps.Marker({
+          position: { lat: point.lat, lng: point.lng },
+          map,
+          label: {
+            text: point.name,
+            color: 'white',
+            fontSize: '13px',
+            fontWeight: 'bold',
+          },
+          icon: {
+            url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+            scaledSize: new google.maps.Size(36, 36),
+          },
+          title: point.name,
+        });
+
+        markersRef.current.push(marker);
+        bounds.extend({ lat: point.lat, lng: point.lng });
+      });
+    }
+
+    // Case 2: Show optimized nodes (source + buildings + poles)
+    else if (mstNodes.length > 0) {
       hasValidPoints = true;
+      mstNodes.forEach((node) => {
+        if (isNaN(node.lat) || isNaN(node.lng)) return;
 
-      const marker = createMarker(point, map);
-      markersRef.current.push(marker);
+        let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
+        let labelColor = 'white';
+        let scaledSize = new google.maps.Size(36, 36);
 
-      bounds.extend({ lat: point.lat, lng: point.lng });
-    });
+        switch (node.type) {
+          case 'source':
+            iconUrl += 'green-dot.png';
+            labelColor = '#00ff00';
+            scaledSize = new google.maps.Size(44, 44);
+            break;
+          case 'building':
+            iconUrl += 'blue-dot.png';
+            break;
+          case 'pole':
+            iconUrl += 'yellow-dot.png';
+            scaledSize = new google.maps.Size(28, 28);
+            break;
+          default:
+            iconUrl += 'red-dot.png';
+        }
 
-    // 4. Fit map bounds if we have valid points
+        const marker = new google.maps.Marker({
+          position: { lat: node.lat, lng: node.lng },
+          map,
+          label: {
+            text: node.name,
+            color: labelColor,
+            fontSize: node.type === 'pole' ? '11px' : '13px',
+            fontWeight: 'bold',
+          },
+          icon: { url: iconUrl, scaledSize },
+          title: `${node.name} (${node.type})`,
+        });
+
+        markersRef.current.push(marker);
+        bounds.extend({ lat: node.lat, lng: node.lng });
+      });
+    }
+
+    // Always try to fit bounds if we have something to show
     if (hasValidPoints && !bounds.isEmpty()) {
-      // Slight delay helps when map is still initializing / resizing
+      // Add a small delay to ensure map is ready for fitBounds
       setTimeout(() => {
         map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 120);
+      }, 100);
     }
-  }, [map, dataPoints, mstNodes]); // dependencies are correct
+  }, [map, dataPoints, mstNodes]);
+
   // Draw lines on map
   useEffect(() => {
     if (!map) return;
@@ -398,8 +210,7 @@ export default function DemoPage() {
     mstEdges.forEach((edge) => {
       if (!edge?.start || !edge?.end) return;
 
-      const color =
-        edge.voltage === 'high' ? highVoltageColor : lowVoltageColor;
+      const color = edge.voltage === 'high' ? '#8B5CF6' : '#3B82F6'; // purple high, blue low
       const weight = edge.voltage === 'high' ? 6 : 4;
 
       const polyline = new google.maps.Polyline({
@@ -417,58 +228,20 @@ export default function DemoPage() {
 
   // fit map to uploaded points immediately (before optimization)
   useEffect(() => {
-    if (!map) return;
-
-    // Clear previous markers
-    markersRef.current.forEach((m) => (m.map = null));
-    markersRef.current = [];
+    if (!map || dataPoints.length === 0 || mstNodes.length > 0) return; // skip if MST already drawn
 
     const bounds = new google.maps.LatLngBounds();
-    let hasValidPoints = false;
 
-    // Decide which list to render
-    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
-
-    pointsToShow.forEach((point) => {
-      if (isNaN(point.lat) || isNaN(point.lng)) return;
-      hasValidPoints = true;
-
-      const marker = createMarker(point, map);
-      markersRef.current.push(marker);
-
-      bounds.extend({ lat: point.lat, lng: point.lng });
+    dataPoints.forEach((point) => {
+      if (!isNaN(point.lat) && !isNaN(point.lng)) {
+        bounds.extend({ lat: point.lat, lng: point.lng });
+      }
     });
 
-    // Fit bounds if we have valid points
-    if (hasValidPoints && !bounds.isEmpty()) {
-      // Small delay helps avoid race conditions with map init
-      setTimeout(() => {
-        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 150);
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
     }
-  }, [map, dataPoints, mstNodes]);
-
-  // Fetch saved runs when user is logged in
-  useEffect(() => {
-    if (!session?.user?.id) return;
-
-    const fetchSaved = async () => {
-      setLoadingSaved(true);
-      try {
-        const res = await fetch('/api/minigrids');
-        if (res.ok) {
-          const data = await res.json();
-          setSavedRuns(data);
-        }
-      } catch (err) {
-        console.error('Failed to load saved runs', err);
-      } finally {
-        setLoadingSaved(false);
-      }
-    };
-
-    fetchSaved();
-  }, [session?.user?.id]);
+  }, [map, dataPoints]); // only when raw points change
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -478,8 +251,46 @@ export default function DemoPage() {
     processFile(file);
   };
 
+  // parse a KML file and extract point placemarks
+  const parseKml = (text: string): LocationPoint[] => {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'application/xml');
+    const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+    const points: LocationPoint[] = [];
+
+    placemarks.forEach((placemark) => {
+      const nameEl = placemark.getElementsByTagName('name')[0];
+      const baseName = nameEl?.textContent?.trim() || 'Unnamed';
+
+      // look for <Point> coordinates first
+      const coordsEls = Array.from(
+        placemark.getElementsByTagName('coordinates')
+      );
+
+      coordsEls.forEach((coordsEl, coordIdx) => {
+        const coordsText = coordsEl.textContent?.trim() || '';
+        if (!coordsText) return;
+
+        // coordinates may be "lon,lat[,alt]" or multiple pairs separated by spaces or newlines
+        const firstPair = coordsText.split(/\s+/)[0];
+        const parts = firstPair.split(',');
+        if (parts.length < 2) return;
+        const lon = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+        if (isNaN(lat) || isNaN(lon)) return;
+
+        const name =
+          coordsEls.length > 1 ? `${baseName}_${coordIdx + 1}` : baseName;
+
+        points.push({ name, lat, lng: lon });
+      });
+    });
+
+    return points;
+  };
+
   const processFile = (file: File) => {
-    // Reset anything derived from the previous CSV so the map + UI refresh cleanly
+    // Reset anything derived from the previous upload so the map + UI refresh cleanly
     setMstEdges([]);
     setMstNodes([]);
     setCostBreakdown(null);
@@ -489,65 +300,93 @@ export default function DemoPage() {
     setFileName(file.name);
     setLoading(true);
 
-    Papa.parse(file, {
-      header: true, // treat first row as headers
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim().toLowerCase(), // normalize headers
-      complete: (result) => {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith('.kml')) {
+      // read as text and parse KML
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
         try {
-          const rows = result.data as Record<string, string>[];
-
-          const parsedPoints: LocationPoint[] = rows
-            .map((row) => {
-              const name = row.name?.trim() || row['name'] || 'Unnamed';
-              const type = row.type?.trim() || row['type'] || 'Unknown';
-              const latStr = row.latitude || row.lat || '';
-              const lngStr = row.longitude || row.lng || row.logitude || '';
-
-              const lat = parseFloat(latStr);
-              const lng = parseFloat(lngStr);
-
-              if (isNaN(lat) || isNaN(lng)) return null;
-
-              // Validate coordinate precision (require at least 6 decimal places)
-              const latPrecision = (latStr.split('.')[1] || '').length;
-              const lngPrecision = (lngStr.split('.')[1] || '').length;
-
-              if (latPrecision < 6 || lngPrecision < 6) {
-                console.warn(
-                  `Low precision coordinates for ${name}: lat=${latStr} (${latPrecision} decimals), lng=${lngStr} (${lngPrecision} decimals)`
-                );
-                // Still accept but warn - could make this stricter if needed
-              }
-
-              return { name, type, lat, lng };
-            })
-            .filter((p): p is LocationPoint => p !== null);
-
-          console.log('Parsed CSV:', parsedPoints);
-
+          const parsedPoints = parseKml(text);
+          console.log('Parsed KML:', parsedPoints);
           if (parsedPoints.length === 0) {
-            setError(
-              'No valid rows found. Expected columns: Name, Type, Latitude, Longitude (case-insensitive). ' +
-                'Make sure lat/lng are numbers and Type is either "source" or "terminal".'
-            );
-            setDataPoints([]); // ensure old markers stay cleared
+            setError('No valid placemarks found in KML.');
+            setDataPoints([]);
           } else {
             setDataPoints(parsedPoints);
           }
         } catch (err) {
-          setError('Error parsing CSV. Please check file format.');
+          setError('Error parsing KML file.');
           console.error(err);
         } finally {
           setLoading(false);
         }
-      },
-      error: (err) => {
-        setError('Failed to read file.');
-        console.error(err);
+      };
+      reader.onerror = () => {
+        setError('Failed to read KML file.');
         setLoading(false);
-      },
-    });
+      };
+      reader.readAsText(file);
+    } else {
+      // assume CSV (Papa.parse handles invalid formats too)
+      Papa.parse(file, {
+        header: true, // treat first row as headers
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim().toLowerCase(), // normalize headers
+        complete: (result) => {
+          try {
+            const rows = result.data as Record<string, string>[];
+
+            const parsedPoints: LocationPoint[] = rows
+              .map((row) => {
+                const name = row.name?.trim() || row['name'] || 'Unnamed';
+                const latStr = row.latitude || row.lat || '';
+                const lngStr = row.longitude || row.lng || row.logitude || '';
+
+                const lat = parseFloat(latStr);
+                const lng = parseFloat(lngStr);
+
+                if (isNaN(lat) || isNaN(lng)) return null;
+
+                // Validate coordinate precision (require at least 6 decimal places)
+                const latPrecision = (latStr.split('.')[1] || '').length;
+                const lngPrecision = (lngStr.split('.')[1] || '').length;
+
+                if (latPrecision < 6 || lngPrecision < 6) {
+                  console.warn(
+                    `Low precision coordinates for ${name}: lat=${latStr} (${latPrecision} decimals), lng=${lngStr} (${lngPrecision} decimals)`
+                  );
+                  // Still accept but warn - could make this stricter if needed
+                }
+
+                return { name, lat, lng };
+              })
+              .filter((p): p is LocationPoint => p !== null);
+
+            console.log('Parsed CSV:', parsedPoints);
+
+            if (parsedPoints.length === 0) {
+              setError(
+                'No valid rows found. Expected columns: Name, Latitude, Longitude (case-insensitive). Make sure lat/lng are numbers.'
+              );
+              setDataPoints([]); // ensure old markers stay cleared
+            } else {
+              setDataPoints(parsedPoints);
+            }
+          } catch (err) {
+            setError('Error parsing CSV. Please check file format.');
+            console.error(err);
+          } finally {
+            setLoading(false);
+          }
+        },
+        error: (err) => {
+          setError('Failed to read file.');
+          console.error(err);
+          setLoading(false);
+        },
+      });
+    }
   };
 
   const generateTestData = (count: number) => {
@@ -560,13 +399,12 @@ export default function DemoPage() {
 
     // Generate random points within a 100 square mile area
     // 100 square miles is roughly 10 miles x 10 miles
-    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees,
-    // 0.001 degrees ≈ 0.07 miles - more on the scale of the mini grids
+    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees
     // Longitude degrees vary with latitude, but we'll use a center point
     const centerLat = 33.77728650419152; // Georgia Tech campus, Atlanta, GA
     const centerLng = -84.39617097270636;
-    const latRange = 0.001; // small
-    const lngRange = 0.001 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
+    const latRange = 0.145; // ~10 miles north/south
+    const lngRange = 0.145 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
 
     const points: LocationPoint[] = [];
     const maxAttempts = count * 10; // Prevent infinite loops
@@ -574,7 +412,6 @@ export default function DemoPage() {
 
     while (points.length < count && attempts < maxAttempts) {
       // Generate coordinates with high precision
-
       const latOffset = (Math.random() - 0.5) * latRange * 2;
       const lngOffset = (Math.random() - 0.5) * lngRange * 2;
 
@@ -590,15 +427,8 @@ export default function DemoPage() {
       );
 
       if (!isDuplicate) {
-        const type = points.length === 0 ? 'source' : 'terminal';
-        const name =
-          points.length === 0
-            ? 'Source'
-            : `Destination ${String(points.length + 1).padStart(2, '0')}`;
-
         points.push({
-          name: name,
-          type,
+          name: `Location_${String(points.length + 1).padStart(2, '0')}`,
           lat,
           lng,
         });
@@ -632,14 +462,16 @@ export default function DemoPage() {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
+      const name = file.name.toLowerCase();
       if (
         file.type === 'text/csv' ||
-        file.name.toLowerCase().endsWith('.csv')
+        name.endsWith('.csv') ||
+        name.endsWith('.kml')
       ) {
         // Process the file directly instead of creating a synthetic event
         processFile(file);
       } else {
-        setError('Please drop a CSV file.');
+        setError('Please drop a CSV or KML file.');
       }
     }
   };
@@ -656,32 +488,25 @@ export default function DemoPage() {
     setCalcError(null);
 
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL ||
-      'http://localhost:8000/optimize/v1';
+      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
 
     const startTime = performance.now();
-    const debug = true;
 
     try {
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          points: markersRef.current.map((marker) => {
-            const pos = marker.position as google.maps.LatLngLiteral; // or just as { lat: number; lng: number }
-
-            return {
-              lat: pos.lat,
-              lng: pos.lng,
-              name: marker.title ?? null,
-            };
-          }),
+          points: dataPoints.map((p) => ({
+            lat: p.lat,
+            lng: p.lng,
+            name: p.name ?? null,
+          })),
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,
             highVoltageCostPerMeter: highVoltageCost || 0,
           },
-          debug: false,
         }),
       });
 
@@ -703,9 +528,7 @@ export default function DemoPage() {
 
       const data = await res.json();
 
-      if (debug) {
-        console.log('Optimization result:', data);
-      }
+      // console.log('Optimization result:', data);
 
       if (data.error) throw new Error(data.error);
 
@@ -781,354 +604,6 @@ export default function DemoPage() {
     setHighVoltageCost(highVoltageCost);
   };
 
-  const downloadKml = () => {
-    if (mstNodes.length === 0 || mstEdges.length === 0) return;
-
-    const escapeXml = (str: string) =>
-      str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-
-    const formatCost = (v: number) =>
-      v.toLocaleString(undefined, {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      });
-
-    const kmlStyles = `
-    <Style id="source">
-      <IconStyle><color>ff00cc00</color><scale>1.5</scale></IconStyle>
-      <LabelStyle><color>ff00ff00</color><scale>1.1</scale></LabelStyle>
-    </Style>
-    <Style id="terminal">
-      <IconStyle><color>ff3366ff</color><scale>1.3</scale></IconStyle>
-      <LabelStyle><scale>1.0</scale></LabelStyle>
-    </Style>
-    <Style id="pole">
-      <IconStyle><color>ffffff66</color><scale>1.1</scale></IconStyle>
-      <LabelStyle><color>ffffffff</color><scale>0.85</scale></LabelStyle>
-    </Style>
-    <Style id="lowVoltage">
-      <LineStyle><color>aa3b82f6</color><width>5</width></LineStyle>
-    </Style>
-    <Style id="highVoltage">
-      <LineStyle><color>aa8b5cf6</color><width>7</width></LineStyle>
-    </Style>
-    <Style id="summary">
-      <BalloonStyle>
-        <text><![CDATA[<h3>$[name]</h3><p>$[description]</p>]]></text>
-      </BalloonStyle>
-    </Style>
-  `;
-
-    // Nodes
-    let nodesKml = '';
-    mstNodes.forEach((node) => {
-      const styleId =
-        node.type === 'source'
-          ? 'source'
-          : node.type === 'terminal'
-            ? 'terminal'
-            : 'pole';
-      const displayName =
-        node.type === 'pole'
-          ? `Pole ${String(node.index).padStart(3, '0')}`
-          : escapeXml(node.name);
-
-      nodesKml += `
-      <Placemark>
-        <name>${displayName}</name>
-        <styleUrl>#${styleId}</styleUrl>
-        <description><![CDATA[
-          <b>${escapeXml(node.name)}</b><br/>
-          Type: ${node.type}<br/>
-          Index: ${node.index}<br/>
-          Lat,Lng: ${node.lat.toFixed(7)}, ${node.lng.toFixed(7)}
-        ]]></description>
-        <Point>
-          <coordinates>${node.lng.toFixed(8)},${node.lat.toFixed(8)},0</coordinates>
-        </Point>
-      </Placemark>`;
-    });
-
-    // Edges
-    let linesKml = '';
-    mstEdges.forEach((edge, i) => {
-      const styleId = edge.voltage === 'high' ? 'highVoltage' : 'lowVoltage';
-      const lengthM = Math.round(edge.lengthMeters);
-      const costPerM =
-        edge.voltage === 'high' ? highVoltageCost : lowVoltageCost;
-      const edgeCost = Math.round(lengthM * costPerM);
-
-      linesKml += `
-      <Placemark>
-        <name>Line ${i + 1} (${edge.voltage})</name>
-        <styleUrl>#${styleId}</styleUrl>
-        <description><![CDATA[
-          <b>Segment ${i + 1}</b><br/>
-          Voltage: ${edge.voltage}<br/>
-          Length: ${lengthM.toLocaleString()} m<br/>
-          Est. cost: ${formatCost(edgeCost)}
-        ]]></description>
-        <LineString>
-          <tessellate>1</tessellate>
-          <coordinates>
-            ${edge.start.lng.toFixed(8)},${edge.start.lat.toFixed(8)},0
-            ${edge.end.lng.toFixed(8)},${edge.end.lat.toFixed(8)},0
-          </coordinates>
-        </LineString>
-      </Placemark>`;
-    });
-
-    // Summary
-    const summaryDescription = costBreakdown
-      ? `
-    <b>Grand Total:</b> ${formatCost(costBreakdown.grandTotal)}<br/>
-    <b>Wire:</b> ${formatCost(costBreakdown.wireCost)}<br/>
-      • Low: ${formatMeters(costBreakdown.lowVoltageMeters)} m → ${formatCost(costBreakdown.lowWireCost)}<br/>
-      • High: ${formatMeters(costBreakdown.highVoltageMeters)} m → ${formatCost(costBreakdown.highWireCost)}<br/>
-    <b>Poles:</b> ${costBreakdown.poleCount} × ${formatCost(costBreakdown.usedPoleCost ?? poleCost)}<br/>
-    <br/>Nodes: ${mstNodes.length} • Segments: ${mstEdges.length}
-  `
-      : 'No cost data available';
-
-    const summaryPlacemark = `
-    <Placemark>
-      <name>Mini-Grid Cost Summary</name>
-      <styleUrl>#summary</styleUrl>
-      <description><![CDATA[${summaryDescription}]]></description>
-      <Point><coordinates>0,0,0</coordinates></Point>
-    </Placemark>
-  `;
-
-    // Assemble final KML
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>Mini-Grid • ${fileName || 'Optimized Network'}</name>
-    <open>1</open>
-
-    ${kmlStyles}
-
-    <Folder>
-      <name>Nodes and Poles</name>
-      <open>1</open>
-      ${nodesKml}
-    </Folder>
-
-    <Folder>
-      <name>Power Lines</name>
-      <open>1</open>
-      ${linesKml}
-    </Folder>
-
-    <Folder>
-      <name>Summary</name>
-      ${summaryPlacemark}
-    </Folder>
-
-  </Document>
-</kml>`;
-
-    // Download
-    const blob = new Blob([kml], {
-      type: 'application/vnd.google-earth.kml+xml',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `minigrid_${new Date().toISOString().slice(0, 10)}.kml`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const loadSavedRun = (run: MiniGridRun) => {
-    console.log('Loading saved mini-grid:', run.id, run.name || '(no name)');
-
-    // Log what we actually received (for debugging)
-    console.log('Saved costs:', {
-      poleCost: run.poleCost,
-      lowVoltageCost: run.lowVoltageCost,
-      highVoltageCost: run.highVoltageCost,
-    });
-
-    // Reset and load core data
-    setDataPoints(run.dataPoints || []);
-    setMstNodes(run.mstNodes || []);
-    setMstEdges(
-      (run.mstEdges || []).map((e: MSTEdge) => ({
-        start: { lat: Number(e.start?.lat), lng: Number(e.start?.lng) },
-        end: { lat: Number(e.end?.lat), lng: Number(e.end?.lng) },
-        lengthMeters: Number(e.lengthMeters) || 0,
-        voltage: e.voltage || 'low',
-      }))
-    );
-
-    setPoleCost(Number(run.poleCost) || 100);
-    setLowVoltageCost(Number(run.lowVoltageCost) || 10);
-    setHighVoltageCost(Number(run.highVoltageCost) || 20);
-
-    // Load cost breakdown if it exists
-    setCostBreakdown(run.costBreakdown || null);
-
-    // Restore file name / metadata
-    setFileName(run.fileName || null);
-
-    // Optional: recenter map on loaded nodes
-    setTimeout(() => {
-      if (map && run.mstNodes?.length > 0) {
-        const bounds = new google.maps.LatLngBounds();
-        run.mstNodes.forEach((p: MSTNode) =>
-          bounds.extend({ lat: Number(p.lat), lng: Number(p.lng) })
-        );
-        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }
-    }, 300);
-
-    alert(`Loaded: ${run.name || 'Mini-grid run'}`);
-  };
-
-  const handleDeleteRun = async (runId: string, runName?: string) => {
-    if (
-      !confirm(
-        `Are you sure you want to delete "${runName || 'this mini-grid'}"?`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/minigrids/${runId}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to delete');
-      }
-
-      // Remove from local state (optimistic update)
-      setSavedRuns((prev) => prev.filter((r) => r.id !== runId));
-
-      alert('Mini-grid deleted successfully');
-    } catch (err) {
-      console.error('Delete error:', err);
-      alert(
-        'Failed to delete mini-grid: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
-    }
-  };
-
-  function SaveMiniGridButton({
-    isAuthenticated,
-    onSave,
-    disabled,
-  }: {
-    isAuthenticated: boolean;
-    onSave: () => void;
-    disabled: boolean;
-  }) {
-    if (!isAuthenticated) {
-      return (
-        <button
-          disabled
-          className='flex-1 cursor-not-allowed rounded bg-zinc-700 px-10 py-4 text-center font-medium text-zinc-400 sm:flex-none'
-        >
-          Sign in to save
-        </button>
-      );
-    }
-
-    return (
-      <button
-        onClick={onSave}
-        disabled={disabled}
-        className='flex-1 rounded bg-emerald-600 px-10 py-4 text-center font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
-      >
-        Save to My Maps
-      </button>
-    );
-  }
-
-  const handleSaveToDatabase = async () => {
-    if (!session?.user?.id) {
-      alert('Please sign in to save your mini-grid.');
-      return;
-    }
-
-    if (mstNodes.length === 0) {
-      alert('No optimization results to save yet.');
-      return;
-    }
-
-    // Quick client-side check (optimistic)
-    if (savedRuns.length >= 10) {
-      alert(
-        'You have reached the maximum of 10 saved mini-grids.\n\n' +
-          'Please delete one of your existing runs before saving a new one.'
-      );
-      return;
-    }
-
-    const name =
-      prompt('Name for this mini-grid run (optional):') ||
-      `MiniGrid ${new Date().toLocaleDateString()}`;
-
-    const payload = {
-      name,
-      fileName: fileName || null,
-      dataPoints,
-      mstNodes,
-      mstEdges,
-      costBreakdown,
-      poleCost,
-      lowVoltageCost,
-      highVoltageCost,
-    };
-
-    try {
-      const res = await fetch('/api/minigrids', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to save mini-grid');
-      }
-
-      alert('Mini-grid saved successfully!');
-
-      // ────────────────────────────────────────────────
-      // Automatically refresh the saved runs list
-      // ────────────────────────────────────────────────
-      const refreshRes = await fetch('/api/minigrids');
-      if (refreshRes.ok) {
-        const updatedRuns = await refreshRes.json();
-        setSavedRuns(updatedRuns);
-        console.log('Saved runs refreshed:', updatedRuns.length, 'items');
-      } else {
-        console.warn(
-          'Could not refresh saved runs after save',
-          refreshRes.status
-        );
-      }
-    } catch (err) {
-      console.error('Save error:', err);
-      alert(
-        'Failed to save mini-grid: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
-    }
-  };
-
   return (
     <div className='min-h-screen overflow-hidden bg-zinc-950 text-white'>
       {/* Hero Header – unchanged */}
@@ -1138,7 +613,7 @@ export default function DemoPage() {
           <div className='mb-8 inline-flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-6 py-2 backdrop-blur-md'>
             <span className='text-2xl'>🚀</span>
             <span className='text-sm font-medium tracking-[4px] uppercase'>
-              C4G - Renewvia Energy Project
+              C4G - Renewvia Energy
             </span>
           </div>
 
@@ -1153,216 +628,160 @@ export default function DemoPage() {
 
       <main className='mx-auto max-w-7xl px-6 py-12'>
         <h2 className='mb-6 text-4xl font-bold'>
-          Mini-Grid Optimization Coordinate and Edges Generation
+          Mini-Grid Locations (Satellite View)
         </h2>
 
-        {/* Map Input – Combined Upload / Test Data / Saved Runs Section */}
-        <div className='mb-12 rounded-xl border border-zinc-600 bg-zinc-900/40 p-8 shadow-xl backdrop-blur-md'>
-          <h2 className='mb-8 text-3xl font-bold text-emerald-300'>
-            Map Input
-          </h2>
+        {/* Upload UI */}
+        <div className='mb-10 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
+          <label className='mb-3 block text-lg font-medium'>
+            Upload CSV or KML with your locations
+          </label>
+          <p className='mb-4 text-sm text-zinc-400'>
+            For CSV: Expected columns:{' '}
+            <code className='text-emerald-300'>Name</code>,{' '}
+            <code className='text-emerald-300'>Latitude</code>,{' '}
+            <code className='text-emerald-300'>Longitude</code>{' '}
+            (case-insensitive). For KML: point placemarks are read from the
+            file.
+          </p>
+          <p className='mb-4 text-sm text-zinc-500'>
+            Example CSV:{' '}
+            <code className='text-blue-300'>
+              Georgia Tech,33.77728650,-84.39617097
+            </code>
+          </p>
+          <p className='mb-4 text-sm text-zinc-500'>
+            Example KML: {/* dialog trigger for full KML example */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <button className='text-sm text-emerald-400 underline hover:text-emerald-300'>
+                  View full KML example
+                </button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>KML Sample Format</DialogTitle>
+                </DialogHeader>
+                <DialogDescription>
+                  <pre className='rounded bg-zinc-800 p-2 text-xs whitespace-pre-wrap'>
+                    {`<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+<Placemark>
+  <name>Georgia Tech</name>
+  <description>Georgia Tech</description>
+  <Point>
+    <coordinates>-84.39617097,33.77728650,0</coordinates>
+  </Point>
+</Placemark>
+</Document>
+</kml>`}
+                  </pre>
+                </DialogDescription>
+                <DialogFooter>
+                  <DialogClose className='rounded bg-emerald-600 px-3 py-1 text-sm hover:bg-emerald-700'>
+                    Close
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </p>
 
-          {/* Upload CSV */}
-          <div className='mb-10'>
-            <label className='mb-3 block text-xl font-medium text-white'>
-              Upload CSV with your locations
-            </label>
-            <p className='mb-4 text-sm text-zinc-400'>
-              Expected columns: <code className='text-emerald-300'>Name</code>,{' '}
-              <code className='text-emerald-300'>Type</code>,{' '}
-              <code className='text-emerald-300'>Latitude</code>,{' '}
-              <code className='text-emerald-300'>Longitude</code>{' '}
-              (case-insensitive)
-            </p>
-            <p className='mb-6 text-sm text-zinc-500'>
-              Example:
-              <br />
-              <code className='mt-1 block text-blue-300'>
-                Georgia Tech, source, 33.77728650, -84.39617097
-                <br />
-                Building 1, terminal, 33.77798650, -84.39613097
-              </code>
-            </p>
-
-            <div
-              className={`relative rounded-lg border-2 border-dashed p-10 text-center transition-all duration-200 ${
-                isDragOver
-                  ? 'scale-[1.01] border-emerald-400 bg-emerald-900/25'
-                  : 'border-zinc-600 hover:border-zinc-500 hover:bg-zinc-950/30'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <div className='space-y-5'>
-                <div className='text-5xl'>📄</div>
-                <div>
-                  <p className='mb-3 text-xl font-medium text-zinc-200'>
-                    {isDragOver
-                      ? 'Drop your CSV file here'
-                      : 'Drag & drop your CSV file here'}
-                  </p>
-                  <p className='text-sm text-zinc-500'>or</p>
-                </div>
-                <label className='inline-block cursor-pointer rounded-lg bg-emerald-600 px-8 py-4 font-semibold text-white shadow-md transition hover:bg-emerald-700 active:scale-95'>
-                  Choose CSV File
-                  <input
-                    type='file'
-                    accept='.csv'
-                    onChange={handleFileUpload}
-                    className='hidden'
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className='mt-5 flex flex-col gap-2 text-center'>
-              {fileName && (
-                <p className='text-sm text-zinc-300'>
-                  Selected: <span className='font-medium'>{fileName}</span>
-                </p>
-              )}
-              {error && <p className='text-red-400'>{error}</p>}
-              {loading && (
-                <p className='text-emerald-400'>Processing file...</p>
-              )}
-              {dataPoints.length > 0 && !loading && (
-                <p className='font-medium text-emerald-300'>
-                  Loaded {dataPoints.length} valid location
-                  {dataPoints.length !== 1 ? 's' : ''}.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
-
-          {/* Generate Test Data */}
-          <div className='mb-10'>
-            <label className='mb-3 block text-xl font-medium text-white'>
-              Or Generate Random Test Data
-            </label>
-            <p className='mb-5 text-sm text-zinc-400'>
-              Create random location points within ~1 square mile area – great
-              for quick testing or demos.
-            </p>
-
-            <div className='flex flex-wrap items-center gap-5'>
-              <select
-                value={selectedCount}
-                onChange={(e) => setSelectedCount(parseInt(e.target.value))}
-                className='min-w-[140px] rounded-lg border border-zinc-600 bg-zinc-800 px-5 py-3 text-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 focus:outline-none'
-              >
-                {Array.from({ length: 91 }, (_, i) => i + 10).map((num) => (
-                  <option key={num} value={num}>
-                    {num} points
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={() => {
-                  try {
-                    generateTestData(selectedCount);
-                  } catch (err) {
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : 'Failed to generate test data'
-                    );
-                  }
-                }}
-                className='rounded-lg bg-blue-600 px-8 py-3 font-semibold text-white shadow-md transition hover:bg-blue-700 active:scale-95 disabled:opacity-50'
-                disabled={loading}
-              >
-                Generate Test Data
-              </button>
-            </div>
-          </div>
-
-          {/* Divider */}
-          {session?.user && (
-            <>
-              <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
-
-              {/* Saved Mini-Grids */}
+          <div
+            className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+              isDragOver
+                ? 'border-emerald-400 bg-emerald-900/20'
+                : 'border-zinc-600 hover:border-zinc-500'
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className='space-y-4'>
+              <div className='text-4xl'>📄</div>
               <div>
-                <h3 className='mb-5 text-2xl font-semibold text-emerald-200'>
-                  Or Load Saved Mini-Grids ({savedRuns.length}/10)
-                </h3>
-
-                {loadingSaved ? (
-                  <p className='text-emerald-400'>Loading your saved runs...</p>
-                ) : savedRuns.length === 0 ? (
-                  <p className='text-zinc-400 italic'>
-                    You haven&#39;t saved any mini-grid runs yet.
-                  </p>
-                ) : (
-                  <div className='grid gap-5 sm:grid-cols-2 lg:grid-cols-3'>
-                    {savedRuns.length >= 10 && session?.user && (
-                      <p className='mt-3 text-center text-sm text-amber-400'>
-                        Maximum of 10 saved mini-grids reached. Delete one to
-                        save more.
-                      </p>
-                    )}
-
-                    {savedRuns.map((run) => (
-                      <div
-                        key={run.id}
-                        className='group relative cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900/70 p-5 transition-all hover:border-emerald-600/60 hover:bg-zinc-900 hover:shadow-lg'
-                      >
-                        {/* Delete button – top right corner */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation(); // prevent card click / load
-                            handleDeleteRun(run.id, run.name);
-                          }}
-                          className='absolute top-3 right-3 z-10 rounded-full bg-red-900/70 p-2 text-red-300 opacity-70 transition hover:bg-red-800 hover:opacity-100'
-                          title='Delete this mini-grid'
-                        >
-                          <svg
-                            xmlns='http://www.w3.org/2000/svg'
-                            className='h-5 w-5'
-                            fill='none'
-                            viewBox='0 0 24 24'
-                            stroke='currentColor'
-                          >
-                            <path
-                              strokeLinecap='round'
-                              strokeLinejoin='round'
-                              strokeWidth={2}
-                              d='M6 18L18 6M6 6l12 12'
-                            />
-                          </svg>
-                        </button>
-
-                        <div onClick={() => loadSavedRun(run)}>
-                          <h4 className='mb-2 font-semibold text-emerald-300 group-hover:text-emerald-200'>
-                            {run.name || 'Untitled Run'}
-                          </h4>
-                          <p className='mb-2 text-sm text-zinc-400'>
-                            {run.fileName
-                              ? `From: ${run.fileName}`
-                              : 'Test data / manual input'}
-                          </p>
-                          <div className='text-xs text-zinc-500'>
-                            {new Date(run.createdAt).toLocaleString()} •{' '}
-                            {run.mstNodes?.length || '?'} nodes
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <p className='mb-2 text-lg font-medium text-zinc-300'>
+                  {isDragOver
+                    ? 'Drop your CSV or KML file here'
+                    : 'Drag & drop your CSV or KML file here'}
+                </p>
+                <p className='text-sm text-zinc-500'>or</p>
               </div>
-            </>
+              <label className='inline-block cursor-pointer rounded bg-emerald-600 px-5 py-3 font-medium transition hover:bg-emerald-700'>
+                Choose CSV or KML File
+                <input
+                  type='file'
+                  accept='.csv,.kml'
+                  onChange={handleFileUpload}
+                  className='hidden'
+                />
+              </label>
+            </div>
+          </div>
+
+          {fileName && (
+            <div className='mt-4 text-center'>
+              <span className='text-sm text-zinc-300'>
+                Selected: {fileName}
+              </span>
+            </div>
           )}
+
+          {error && <p className='mt-4 text-red-400'>{error}</p>}
+          {loading && <p className='mt-4 text-emerald-400'>Processing...</p>}
+          {dataPoints.length > 0 && !loading && (
+            <p className='mt-4 text-emerald-300'>
+              Loaded {dataPoints.length} valid location
+              {dataPoints.length !== 1 ? 's' : ''}.
+            </p>
+          )}
+        </div>
+
+        {/* Test Data UI */}
+        <div className='mb-10 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
+          <label className='mb-3 block text-lg font-medium'>
+            Or generate test data
+          </label>
+          <p className='mb-4 text-sm text-zinc-400'>
+            Generate random location points within a 100 square mile area for
+            testing the optimization algorithm.
+          </p>
+
+          <div className='flex items-center gap-4'>
+            <select
+              value={selectedCount}
+              onChange={(e) => setSelectedCount(parseInt(e.target.value))}
+              className='rounded border border-zinc-600 bg-zinc-800 px-4 py-3 text-white focus:border-emerald-500 focus:outline-none'
+            >
+              {Array.from({ length: 91 }, (_, i) => i + 10).map((num) => (
+                <option key={num} value={num}>
+                  {num} points
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => {
+                try {
+                  generateTestData(selectedCount);
+                } catch (err) {
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : 'Failed to generate test data'
+                  );
+                }
+              }}
+              className='rounded bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700'
+            >
+              Generate Test Data
+            </button>
+          </div>
         </div>
 
         {/* Cost Inputs & Calculate Section */}
         <div className='mt-12 rounded-lg border border-zinc-700 bg-zinc-900/50 p-8 backdrop-blur-sm'>
-          <h3 className='mb-6 text-3xl font-bold'>Input Variables</h3>
+          <h3 className='mb-6 text-3xl font-bold'>Mini-Grid Optimization</h3>
           <p className='mb-6 text-zinc-300'>
             Enter approximate costs per unit. The algorithm will process these
             values as hyperparameters and calculate locations for Poles, Wire,
@@ -1424,55 +843,35 @@ export default function DemoPage() {
               Generate Random Costs
             </button>
           </div>
-        </div>
 
-        <div className='mt-12 rounded-lg border border-zinc-700 bg-zinc-900/50 p-8 backdrop-blur-sm'>
-          <div className='flex justify-center'>
-            <button
-              onClick={handleRunOptimization}
-              disabled={computingMst || dataPoints.length < 2}
-              className='rounded bg-purple-600 px-10 py-5 text-lg font-bold text-white shadow-lg shadow-purple-900/30 transition-all hover:bg-purple-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
-            >
-              {computingMst
-                ? 'Running Optimization...'
-                : 'Run Optimization Algorithm'}
-            </button>
-          </div>
-
-          <p className='mt-6 text-center text-sm text-zinc-500'>
-            Note: In Development - In beta until April 26th 2026. Only Low
-            Voltage
-          </p>
+          <button
+            onClick={handleRunOptimization}
+            disabled={computingMst || dataPoints.length < 2}
+            className='mt-8 rounded bg-purple-600 px-8 py-4 font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50'
+          >
+            {computingMst
+              ? 'Running Optimization...'
+              : 'Run Optimization Algorithm'}
+          </button>
 
           {calculationResult && (
-            <div className='mt-8 rounded border border-zinc-700 bg-zinc-800/80 p-6'>
-              <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
+            <div className='mt-8 rounded bg-zinc-800 p-6'>
+              <h4 className='mb-4 text-xl font-semibold'>
                 Result from Python Script:
               </h4>
-              <pre className='max-h-96 overflow-auto rounded bg-zinc-950/50 p-4 text-sm whitespace-pre-wrap text-emerald-200'>
+              <pre className='text-sm whitespace-pre-wrap text-emerald-300'>
                 {calculationResult}
               </pre>
             </div>
           )}
 
-          {calcError && (
-            <p className='mt-6 text-center font-medium text-red-400'>
-              {calcError}
-            </p>
-          )}
+          {calcError && <p className='mt-6 text-red-400'>{calcError}</p>}
         </div>
 
-        {/* Map container */}
-        <div
-          ref={mapRef}
-          className='mt-8 h-[70vh] w-full rounded-xl border border-zinc-700 shadow-2xl'
-        >
-          Loading satellite map...
-        </div>
         {costBreakdown && (
           <div className='mt-8 rounded-lg border border-emerald-700/30 bg-zinc-900/70 p-6 backdrop-blur-sm'>
             <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
-              Estimated Mini-Grid Costs
+              Estimated Mini-Grid Costs (Real Distance)
             </h4>
 
             {/* Summary Totals */}
@@ -1498,7 +897,7 @@ export default function DemoPage() {
               <div className='rounded bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Poles (est.)</p>
                 <p className='text-lg font-medium text-emerald-400'>
-                  {costBreakdown.poleCount ?? '—'} units @ ${poleCost}
+                  {costBreakdown.poleCount ?? '—'} units
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.poleCost) ?? '0.00'}
@@ -1509,8 +908,7 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
                 <p className='text-lg font-medium text-blue-300'>
-                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m @ $
-                  {lowVoltageCost}
+                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.lowWireCost) ?? '0.00'}
@@ -1521,97 +919,50 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>High Voltage Wire</p>
                 <p className='text-lg font-medium text-purple-300'>
-                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m @ $
-                  {highVoltageCost}
+                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.highWireCost) ?? '0.00'}
                 </p>
               </div>
             </div>
+
+            <p className='mt-6 text-center text-xs text-zinc-500'>
+              Based on MST great-circle distances • pole count ≈ edges + 1
+            </p>
           </div>
         )}
+
+        {/* Map container */}
+        <div
+          ref={mapRef}
+          className='mt-8 h-[70vh] w-full rounded-xl border border-zinc-700 shadow-2xl'
+        >
+          Loading satellite map...
+        </div>
+
         {/* Script loader */}
         <Script
-          src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=marker`}
+          src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`}
           strategy='afterInteractive'
           onLoad={initMap}
         />
       </main>
 
-      {/* Nodes List – Collapsible */}
+      {/* Locations List */}
       {dataPoints.length > 0 && (
         <section className='mx-auto max-w-7xl px-6 py-12'>
-          <details className='group'>
-            <summary className='flex cursor-pointer items-center justify-between rounded-lg border border-zinc-700 bg-zinc-900/70 px-6 py-4 text-xl font-bold text-white transition hover:bg-zinc-800/70'>
-              <h3>
-                Source, Destination, and Generated Pole Coordinates (
-                {mstNodes.length || dataPoints.length})
-              </h3>
-              <span className='text-2xl font-light transition-transform group-open:rotate-180'>
-                ▼
-              </span>
-            </summary>
-
-            <div className='mt-4 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-              <div className='max-h-[60vh] overflow-y-auto font-mono text-sm text-zinc-300'>
-                {(mstNodes.length > 0 ? mstNodes : dataPoints).map(
-                  (point, index) => (
-                    <div key={index} className='mb-1.5 leading-relaxed'>
-                      {index + 1}.{' '}
-                      <span className='font-semibold text-emerald-300'>
-                        {point.name}
-                      </span>
-                      {' – Lat: '}
-                      <span className='text-blue-300'>
-                        {point.lat.toFixed(8)}
-                      </span>
-                      ,{' Lng: '}
-                      <span className='text-blue-300'>
-                        {point.lng.toFixed(8)}
-                      </span>
-                    </div>
-                  )
-                )}
-              </div>
-
-              {/* Optional footer info */}
-              {mstNodes.length > 0 && (
-                <p className='mt-4 text-center text-xs text-zinc-500'>
-                  Showing optimized nodes (source + terminals + poles). Scroll
-                  for full list.
-                </p>
-              )}
-            </div>
-          </details>
-        </section>
-      )}
-
-      {costBreakdown && mstNodes.length > 0 && (
-        <section className='mx-auto max-w-7xl px-6 py-12'>
-          <div className='mx-auto mt-8 max-w-2xl rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-            <h4 className='mb-5 text-center text-xl font-semibold text-emerald-300'>
-              Export Results
-            </h4>
-
-            <div className='flex flex-col justify-center gap-5 sm:flex-row'>
-              <button
-                onClick={downloadKml}
-                className='flex-1 rounded bg-purple-600 px-10 py-4 text-center font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
-                disabled={mstNodes.length === 0 || mstEdges.length === 0}
-              >
-                Download KML
-              </button>
-
-              <SaveMiniGridButton
-                isAuthenticated={!!session?.user}
-                onSave={handleSaveToDatabase}
-                disabled={
-                  computingMst ||
-                  mstNodes.length === 0 ||
-                  savedRuns.length >= 10
-                }
-              />
+          <h3 className='mb-6 text-2xl font-bold text-white'>
+            Location Points ({dataPoints.length})
+          </h3>
+          <div className='rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
+            <div className='font-mono text-sm text-zinc-300'>
+              {dataPoints.map((point, index) => (
+                <div key={index} className='mb-1'>
+                  {index + 1}. {point.name} - Lat: {point.lat.toFixed(8)}, Lng:{' '}
+                  {point.lng.toFixed(8)}
+                </div>
+              ))}
             </div>
           </div>
         </section>
@@ -1619,9 +970,7 @@ export default function DemoPage() {
 
       {/* Footer */}
       <footer className='border-t border-zinc-800 py-12 text-center text-sm text-zinc-500'>
-        <p>
-          © 2026 • CS 6150 Computing For Good • Renewvia Project • Demo Page
-        </p>
+        <p>© 2026 Renewvia • CS 6150 Computing For Good • Project Demo</p>
       </footer>
     </div>
   );

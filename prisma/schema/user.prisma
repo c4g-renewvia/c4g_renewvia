@@ -9,6 +9,7 @@ model User {
   accounts         Account[]
   sessions         Session[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  miniGridRuns MiniGridRun[]
 }

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, ChangeEvent } from 'react';
 import Script from 'next/script';
 import Papa from 'papaparse';
+import { useSession } from 'next-auth/react';
 
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
@@ -55,6 +56,21 @@ const haversineDistance = (
   const distance = R * c; // Distance 'd' = R * c
   return distance;
 };
+
+interface MiniGridRun {
+  id: string;
+  name?: string | null;
+  createdAt: string; // or Date if you convert it
+  fileName?: string | null;
+  dataPoints: LocationPoint[];
+  mstNodes: MSTNode[];
+  mstEdges: MSTEdge[];
+  costBreakdown?: CostBreakdown | null;
+  poleCost: number;
+  lowVoltageCost: number;
+  highVoltageCost: number;
+  // add any other fields you actually use from the API
+}
 
 const formatMeters = (m: number) =>
   m.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -129,11 +145,16 @@ export default function DemoPage() {
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
+  const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
+  const [loadingSaved, setLoadingSaved] = useState(false);
+
   const [costBreakdown, setCostBreakdown] = useState<CostBreakdown | null>(
     null
   );
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  const { data: session } = useSession();
 
   // Initialize map once Google Maps script loads
   const initMap = () => {
@@ -426,6 +447,28 @@ export default function DemoPage() {
       }, 150);
     }
   }, [map, dataPoints, mstNodes]);
+
+  // Fetch saved runs when user is logged in
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const fetchSaved = async () => {
+      setLoadingSaved(true);
+      try {
+        const res = await fetch('/api/minigrids');
+        if (res.ok) {
+          const data = await res.json();
+          setSavedRuns(data);
+        }
+      } catch (err) {
+        console.error('Failed to load saved runs', err);
+      } finally {
+        setLoadingSaved(false);
+      }
+    };
+
+    fetchSaved();
+  }, [session?.user?.id]);
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -904,6 +947,179 @@ export default function DemoPage() {
     URL.revokeObjectURL(url);
   };
 
+  const loadSavedRun = (run: MiniGridRun) => {
+    console.log('Loading saved mini-grid:', run.id, run.name || '(no name)');
+
+    // Log what we actually received (for debugging)
+    console.log('Saved costs:', {
+      poleCost: run.poleCost,
+      lowVoltageCost: run.lowVoltageCost,
+      highVoltageCost: run.highVoltageCost,
+    });
+
+    // Reset and load core data
+    setDataPoints(run.dataPoints || []);
+    setMstNodes(run.mstNodes || []);
+    setMstEdges(
+      (run.mstEdges || []).map((e: MSTEdge) => ({
+        start: { lat: Number(e.start?.lat), lng: Number(e.start?.lng) },
+        end: { lat: Number(e.end?.lat), lng: Number(e.end?.lng) },
+        lengthMeters: Number(e.lengthMeters) || 0,
+        voltage: e.voltage || 'low',
+      }))
+    );
+
+    setPoleCost(Number(run.poleCost) || 100);
+    setLowVoltageCost(Number(run.lowVoltageCost) || 10);
+    setHighVoltageCost(Number(run.highVoltageCost) || 20);
+
+    // Load cost breakdown if it exists
+    setCostBreakdown(run.costBreakdown || null);
+
+    // Restore file name / metadata
+    setFileName(run.fileName || null);
+
+    // Optional: recenter map on loaded nodes
+    setTimeout(() => {
+      if (map && run.mstNodes?.length > 0) {
+        const bounds = new google.maps.LatLngBounds();
+        run.mstNodes.forEach((p: MSTNode) =>
+          bounds.extend({ lat: Number(p.lat), lng: Number(p.lng) })
+        );
+        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+      }
+    }, 300);
+
+    alert(`Loaded: ${run.name || 'Mini-grid run'}`);
+  };
+
+  const handleDeleteRun = async (runId: string, runName?: string) => {
+    if (
+      !confirm(
+        `Are you sure you want to delete "${runName || 'this mini-grid'}"?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/minigrids/${runId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete');
+      }
+
+      // Remove from local state (optimistic update)
+      setSavedRuns((prev) => prev.filter((r) => r.id !== runId));
+
+      alert('Mini-grid deleted successfully');
+    } catch (err) {
+      console.error('Delete error:', err);
+      alert(
+        'Failed to delete mini-grid: ' +
+          (err instanceof Error ? err.message : 'Unknown error')
+      );
+    }
+  };
+
+  function SaveMiniGridButton({
+    isAuthenticated,
+    onSave,
+    disabled,
+  }: {
+    isAuthenticated: boolean;
+    onSave: () => void;
+    disabled: boolean;
+  }) {
+    if (!isAuthenticated) {
+      return (
+        <button
+          disabled
+          className='flex-1 cursor-not-allowed rounded bg-zinc-700 px-10 py-4 text-center font-medium text-zinc-400 sm:flex-none'
+        >
+          Sign in to save
+        </button>
+      );
+    }
+
+    return (
+      <button
+        onClick={onSave}
+        disabled={disabled}
+        className='flex-1 rounded bg-emerald-600 px-10 py-4 text-center font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
+      >
+        Save to My Maps
+      </button>
+    );
+  }
+
+  const handleSaveToDatabase = async () => {
+    if (!session?.user?.id) {
+      alert('Please sign in to save your mini-grid.');
+      return;
+    }
+
+    if (mstNodes.length === 0) {
+      alert('No optimization results to save yet.');
+      return;
+    }
+
+    const name =
+      prompt('Name for this mini-grid run (optional):') ||
+      `MiniGrid ${new Date().toLocaleDateString()}`;
+
+    const payload = {
+      name,
+      fileName: fileName || null,
+      dataPoints,
+      mstNodes,
+      mstEdges,
+      costBreakdown,
+      poleCost,
+      lowVoltageCost,
+      highVoltageCost,
+    };
+
+    try {
+      const res = await fetch('/api/minigrids', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save mini-grid');
+      }
+
+      alert('Mini-grid saved successfully!');
+
+      // ────────────────────────────────────────────────
+      // Automatically refresh the saved runs list
+      // ────────────────────────────────────────────────
+      const refreshRes = await fetch('/api/minigrids');
+      if (refreshRes.ok) {
+        const updatedRuns = await refreshRes.json();
+        setSavedRuns(updatedRuns);
+        console.log('Saved runs refreshed:', updatedRuns.length, 'items');
+      } else {
+        console.warn(
+          'Could not refresh saved runs after save',
+          refreshRes.status
+        );
+      }
+    } catch (err) {
+      console.error('Save error:', err);
+      alert(
+        'Failed to save mini-grid: ' +
+          (err instanceof Error ? err.message : 'Unknown error')
+      );
+    }
+  };
+
   return (
     <div className='min-h-screen overflow-hidden bg-zinc-950 text-white'>
       {/* Hero Header – unchanged */}
@@ -931,116 +1147,201 @@ export default function DemoPage() {
           Mini-Grid Optimization Coordinate and Edges Generation
         </h2>
 
-        {/* Upload UI */}
-        <div className='mb-10 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-          <label className='mb-3 block text-lg font-medium'>
-            Upload CSV with your locations
-          </label>
-          <p className='mb-4 text-sm text-zinc-400'>
-            Expected columns: <code className='text-emerald-300'>Name</code>,{' '}
-            <code className='text-emerald-300'>Type</code>,{' '}
-            <code className='text-emerald-300'>Latitude</code>,{' '}
-            <code className='text-emerald-300'>Longitude</code>{' '}
-            (case-insensitive)
-          </p>
-          <p className='mb-4 text-sm text-zinc-500'>
-            Example: <br />
-            <code className='text-blue-300'>
-              Georgia Tech, source, 33.77728650, -84.39617097 <br />
-              Building 1, terminal, 33.77798650, -84.39613097
-            </code>
-          </p>
+        {/* Map Input – Combined Upload / Test Data / Saved Runs Section */}
+        <div className='mb-12 rounded-xl border border-zinc-600 bg-zinc-900/40 p-8 shadow-xl backdrop-blur-md'>
+          <h2 className='mb-8 text-3xl font-bold text-emerald-300'>
+            Map Input
+          </h2>
 
-          <div
-            className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-              isDragOver
-                ? 'border-emerald-400 bg-emerald-900/20'
-                : 'border-zinc-600 hover:border-zinc-500'
-            }`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <div className='space-y-4'>
-              <div className='text-4xl'>📄</div>
-              <div>
-                <p className='mb-2 text-lg font-medium text-zinc-300'>
-                  {isDragOver
-                    ? 'Drop your CSV file here'
-                    : 'Drag & drop your CSV file here'}
-                </p>
-                <p className='text-sm text-zinc-500'>or</p>
-              </div>
-              <label className='inline-block cursor-pointer rounded bg-emerald-600 px-5 py-3 font-medium transition hover:bg-emerald-700'>
-                Choose CSV File
-                <input
-                  type='file'
-                  accept='.csv'
-                  onChange={handleFileUpload}
-                  className='hidden'
-                />
-              </label>
-            </div>
-          </div>
-
-          {fileName && (
-            <div className='mt-4 text-center'>
-              <span className='text-sm text-zinc-300'>
-                Selected: {fileName}
-              </span>
-            </div>
-          )}
-
-          {error && <p className='mt-4 text-red-400'>{error}</p>}
-          {loading && <p className='mt-4 text-emerald-400'>Processing...</p>}
-          {dataPoints.length > 0 && !loading && (
-            <p className='mt-4 text-emerald-300'>
-              Loaded {dataPoints.length} valid location
-              {dataPoints.length !== 1 ? 's' : ''}.
+          {/* Upload CSV */}
+          <div className='mb-10'>
+            <label className='mb-3 block text-xl font-medium text-white'>
+              Upload CSV with your locations
+            </label>
+            <p className='mb-4 text-sm text-zinc-400'>
+              Expected columns: <code className='text-emerald-300'>Name</code>,{' '}
+              <code className='text-emerald-300'>Type</code>,{' '}
+              <code className='text-emerald-300'>Latitude</code>,{' '}
+              <code className='text-emerald-300'>Longitude</code>{' '}
+              (case-insensitive)
             </p>
-          )}
-        </div>
+            <p className='mb-6 text-sm text-zinc-500'>
+              Example:
+              <br />
+              <code className='mt-1 block text-blue-300'>
+                Georgia Tech, source, 33.77728650, -84.39617097
+                <br />
+                Building 1, terminal, 33.77798650, -84.39613097
+              </code>
+            </p>
 
-        {/* Test Data UI */}
-        <div className='mb-10 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-          <label className='mb-3 block text-lg font-medium'>
-            Or generate test data
-          </label>
-          <p className='mb-4 text-sm text-zinc-400'>
-            Generate random location points within a 100 square mile area for
-            testing the optimization algorithm.
-          </p>
-
-          <div className='flex items-center gap-4'>
-            <select
-              value={selectedCount}
-              onChange={(e) => setSelectedCount(parseInt(e.target.value))}
-              className='rounded border border-zinc-600 bg-zinc-800 px-4 py-3 text-white focus:border-emerald-500 focus:outline-none'
+            <div
+              className={`relative rounded-lg border-2 border-dashed p-10 text-center transition-all duration-200 ${
+                isDragOver
+                  ? 'scale-[1.01] border-emerald-400 bg-emerald-900/25'
+                  : 'border-zinc-600 hover:border-zinc-500 hover:bg-zinc-950/30'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
             >
-              {Array.from({ length: 91 }, (_, i) => i + 10).map((num) => (
-                <option key={num} value={num}>
-                  {num} points
-                </option>
-              ))}
-            </select>
+              <div className='space-y-5'>
+                <div className='text-5xl'>📄</div>
+                <div>
+                  <p className='mb-3 text-xl font-medium text-zinc-200'>
+                    {isDragOver
+                      ? 'Drop your CSV file here'
+                      : 'Drag & drop your CSV file here'}
+                  </p>
+                  <p className='text-sm text-zinc-500'>or</p>
+                </div>
+                <label className='inline-block cursor-pointer rounded-lg bg-emerald-600 px-8 py-4 font-semibold text-white shadow-md transition hover:bg-emerald-700 active:scale-95'>
+                  Choose CSV File
+                  <input
+                    type='file'
+                    accept='.csv'
+                    onChange={handleFileUpload}
+                    className='hidden'
+                  />
+                </label>
+              </div>
+            </div>
 
-            <button
-              onClick={() => {
-                try {
-                  generateTestData(selectedCount);
-                } catch (err) {
-                  setError(
-                    err instanceof Error
-                      ? err.message
-                      : 'Failed to generate test data'
-                  );
-                }
-              }}
-              className='rounded bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700'
-            >
-              Generate Test Data
-            </button>
+            <div className='mt-5 flex flex-col gap-2 text-center'>
+              {fileName && (
+                <p className='text-sm text-zinc-300'>
+                  Selected: <span className='font-medium'>{fileName}</span>
+                </p>
+              )}
+              {error && <p className='text-red-400'>{error}</p>}
+              {loading && (
+                <p className='text-emerald-400'>Processing file...</p>
+              )}
+              {dataPoints.length > 0 && !loading && (
+                <p className='font-medium text-emerald-300'>
+                  Loaded {dataPoints.length} valid location
+                  {dataPoints.length !== 1 ? 's' : ''}.
+                </p>
+              )}
+            </div>
           </div>
+
+          {/* Divider */}
+          <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
+
+          {/* Generate Test Data */}
+          <div className='mb-10'>
+            <label className='mb-3 block text-xl font-medium text-white'>
+              Or Generate Random Test Data
+            </label>
+            <p className='mb-5 text-sm text-zinc-400'>
+              Create random location points within ~1 square mile area – great
+              for quick testing or demos.
+            </p>
+
+            <div className='flex flex-wrap items-center gap-5'>
+              <select
+                value={selectedCount}
+                onChange={(e) => setSelectedCount(parseInt(e.target.value))}
+                className='min-w-[140px] rounded-lg border border-zinc-600 bg-zinc-800 px-5 py-3 text-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 focus:outline-none'
+              >
+                {Array.from({ length: 91 }, (_, i) => i + 10).map((num) => (
+                  <option key={num} value={num}>
+                    {num} points
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => {
+                  try {
+                    generateTestData(selectedCount);
+                  } catch (err) {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : 'Failed to generate test data'
+                    );
+                  }
+                }}
+                className='rounded-lg bg-blue-600 px-8 py-3 font-semibold text-white shadow-md transition hover:bg-blue-700 active:scale-95 disabled:opacity-50'
+                disabled={loading}
+              >
+                Generate Test Data
+              </button>
+            </div>
+          </div>
+
+          {/* Divider */}
+          {session?.user && (
+            <>
+              <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
+
+              {/* Saved Mini-Grids */}
+              <div>
+                <h3 className='mb-5 text-2xl font-semibold text-emerald-200'>
+                  Or Load Saved Mini-Grids
+                </h3>
+
+                {loadingSaved ? (
+                  <p className='text-emerald-400'>Loading your saved runs...</p>
+                ) : savedRuns.length === 0 ? (
+                  <p className='text-zinc-400 italic'>
+                    You haven&#39;t saved any mini-grid runs yet.
+                  </p>
+                ) : (
+                  <div className='grid gap-5 sm:grid-cols-2 lg:grid-cols-3'>
+                    {savedRuns.map((run) => (
+                      <div
+                        key={run.id}
+                        className='group relative cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900/70 p-5 transition-all hover:border-emerald-600/60 hover:bg-zinc-900 hover:shadow-lg'
+                      >
+                        {/* Delete button – top right corner */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation(); // prevent card click / load
+                            handleDeleteRun(run.id, run.name);
+                          }}
+                          className='absolute top-3 right-3 z-10 rounded-full bg-red-900/70 p-2 text-red-300 opacity-70 transition hover:bg-red-800 hover:opacity-100'
+                          title='Delete this mini-grid'
+                        >
+                          <svg
+                            xmlns='http://www.w3.org/2000/svg'
+                            className='h-5 w-5'
+                            fill='none'
+                            viewBox='0 0 24 24'
+                            stroke='currentColor'
+                          >
+                            <path
+                              strokeLinecap='round'
+                              strokeLinejoin='round'
+                              strokeWidth={2}
+                              d='M6 18L18 6M6 6l12 12'
+                            />
+                          </svg>
+                        </button>
+
+                        <div onClick={() => loadSavedRun(run)}>
+                          <h4 className='mb-2 font-semibold text-emerald-300 group-hover:text-emerald-200'>
+                            {run.name || 'Untitled Run'}
+                          </h4>
+                          <p className='mb-2 text-sm text-zinc-400'>
+                            {run.fileName
+                              ? `From: ${run.fileName}`
+                              : 'Test data / manual input'}
+                          </p>
+                          <div className='text-xs text-zinc-500'>
+                            {new Date(run.createdAt).toLocaleString()} •{' '}
+                            {run.mstNodes?.length || '?'} nodes
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Cost Inputs & Calculate Section */}
@@ -1107,34 +1408,42 @@ export default function DemoPage() {
               Generate Random Costs
             </button>
           </div>
+        </div>
 
-          <button
-            onClick={handleRunOptimization}
-            disabled={computingMst || dataPoints.length < 2}
-            className='mt-8 rounded bg-purple-600 px-8 py-4 font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50'
-          >
-            {computingMst
-              ? 'Running Optimization...'
-              : 'Run Optimization Algorithm'}
-          </button>
+        <div className='mt-12 rounded-lg border border-zinc-700 bg-zinc-900/50 p-8 backdrop-blur-sm'>
+          <div className='flex justify-center'>
+            <button
+              onClick={handleRunOptimization}
+              disabled={computingMst || dataPoints.length < 2}
+              className='rounded bg-purple-600 px-10 py-5 text-lg font-bold text-white shadow-lg shadow-purple-900/30 transition-all hover:bg-purple-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
+            >
+              {computingMst
+                ? 'Running Optimization...'
+                : 'Run Optimization Algorithm'}
+            </button>
+          </div>
 
-          <p className='mt-4 text-center text-sm text-zinc-500'>
+          <p className='mt-6 text-center text-sm text-zinc-500'>
             Note: In Development - In beta until April 26th 2026. Only Low
             Voltage
           </p>
 
           {calculationResult && (
-            <div className='mt-8 rounded bg-zinc-800 p-6'>
-              <h4 className='mb-4 text-xl font-semibold'>
+            <div className='mt-8 rounded border border-zinc-700 bg-zinc-800/80 p-6'>
+              <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
                 Result from Python Script:
               </h4>
-              <pre className='text-sm whitespace-pre-wrap text-emerald-300'>
+              <pre className='max-h-96 overflow-auto rounded bg-zinc-950/50 p-4 text-sm whitespace-pre-wrap text-emerald-200'>
                 {calculationResult}
               </pre>
             </div>
           )}
 
-          {calcError && <p className='mt-6 text-red-400'>{calcError}</p>}
+          {calcError && (
+            <p className='mt-6 text-center font-medium text-red-400'>
+              {calcError}
+            </p>
+          )}
         </div>
 
         {/* Map container */}
@@ -1144,7 +1453,6 @@ export default function DemoPage() {
         >
           Loading satellite map...
         </div>
-
         {costBreakdown && (
           <div className='mt-8 rounded-lg border border-emerald-700/30 bg-zinc-900/70 p-6 backdrop-blur-sm'>
             <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
@@ -1174,7 +1482,7 @@ export default function DemoPage() {
               <div className='rounded bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Poles (est.)</p>
                 <p className='text-lg font-medium text-emerald-400'>
-                  {costBreakdown.poleCount ?? '—'} units
+                  {costBreakdown.poleCount ?? '—'} units @ ${poleCost}
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.poleCost) ?? '0.00'}
@@ -1185,7 +1493,8 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
                 <p className='text-lg font-medium text-blue-300'>
-                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m
+                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m @ $
+                  {lowVoltageCost}
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.lowWireCost) ?? '0.00'}
@@ -1196,7 +1505,8 @@ export default function DemoPage() {
               <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
                 <p className='text-sm text-zinc-400'>High Voltage Wire</p>
                 <p className='text-lg font-medium text-purple-300'>
-                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m
+                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m @ $
+                  {highVoltageCost}
                 </p>
                 <p className='text-base font-semibold'>
                   ${formatUSD(costBreakdown.highWireCost) ?? '0.00'}
@@ -1205,7 +1515,6 @@ export default function DemoPage() {
             </div>
           </div>
         )}
-
         {/* Script loader */}
         <Script
           src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=marker`}
@@ -1277,6 +1586,12 @@ export default function DemoPage() {
               >
                 Download KML
               </button>
+
+              <SaveMiniGridButton
+                isAuthenticated={!!session?.user} // you'll add useSession below
+                onSave={handleSaveToDatabase}
+                disabled={computingMst || mstNodes.length === 0}
+              />
             </div>
           </div>
         </section>

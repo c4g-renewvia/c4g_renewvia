@@ -8,7 +8,24 @@ export async function POST(req: NextRequest) {
   const session = await auth();
 
   if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const userId = session.user.id;
+
+  // Check current count
+  const currentCount = await prisma.miniGridRun.count({
+    where: { userId },
+  });
+
+  if (currentCount >= 10) {
+    return Response.json(
+      {
+        error:
+          'Save limit reached (maximum 10 mini-grids per user). Please delete an existing one first.',
+      },
+      { status: 403 }
+    );
   }
 
   try {

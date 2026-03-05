@@ -1067,6 +1067,15 @@ export default function DemoPage() {
       return;
     }
 
+    // Quick client-side check (optimistic)
+    if (savedRuns.length >= 10) {
+      alert(
+        'You have reached the maximum of 10 saved mini-grids.\n\n' +
+          'Please delete one of your existing runs before saving a new one.'
+      );
+      return;
+    }
+
     const name =
       prompt('Name for this mini-grid run (optional):') ||
       `MiniGrid ${new Date().toLocaleDateString()}`;
@@ -1280,7 +1289,7 @@ export default function DemoPage() {
               {/* Saved Mini-Grids */}
               <div>
                 <h3 className='mb-5 text-2xl font-semibold text-emerald-200'>
-                  Or Load Saved Mini-Grids
+                  Or Load Saved Mini-Grids ({savedRuns.length}/10)
                 </h3>
 
                 {loadingSaved ? (
@@ -1291,6 +1300,13 @@ export default function DemoPage() {
                   </p>
                 ) : (
                   <div className='grid gap-5 sm:grid-cols-2 lg:grid-cols-3'>
+                    {savedRuns.length >= 10 && session?.user && (
+                      <p className='mt-3 text-center text-sm text-amber-400'>
+                        Maximum of 10 saved mini-grids reached. Delete one to
+                        save more.
+                      </p>
+                    )}
+
                     {savedRuns.map((run) => (
                       <div
                         key={run.id}
@@ -1588,9 +1604,13 @@ export default function DemoPage() {
               </button>
 
               <SaveMiniGridButton
-                isAuthenticated={!!session?.user} // you'll add useSession below
+                isAuthenticated={!!session?.user}
                 onSave={handleSaveToDatabase}
-                disabled={computingMst || mstNodes.length === 0}
+                disabled={
+                  computingMst ||
+                  mstNodes.length === 0 ||
+                  savedRuns.length >= 10
+                }
               />
             </div>
           </div>

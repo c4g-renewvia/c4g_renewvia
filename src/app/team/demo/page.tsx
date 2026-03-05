@@ -59,7 +59,7 @@ const haversineDistance = (
 
 interface MiniGridRun {
   id: string;
-  name?: string | null;
+  name?: string;
   createdAt: string; // or Date if you convert it
   fileName?: string | null;
   dataPoints: LocationPoint[];

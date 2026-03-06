@@ -3,6 +3,17 @@
 import React, { useEffect, useRef, useState, ChangeEvent } from 'react';
 import Script from 'next/script';
 import Papa from 'papaparse';
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogFooter,
+} from '@/components/ui/dialog';
+
 import { useSession } from 'next-auth/react';
 
 const GOOGLE_MAPS_API_KEY =
@@ -470,6 +481,44 @@ export default function DemoPage() {
     fetchSaved();
   }, [session?.user?.id]);
 
+  const parseKml = (text: string): LocationPoint[] => {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'application/xml');
+    const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+    const points: LocationPoint[] = [];
+
+    placemarks.forEach((placemark) => {
+      const nameEl = placemark.getElementsByTagName('name')[0];
+      const baseName = nameEl?.textContent?.trim() || 'Unnamed';
+
+      const coordsEls = Array.from(
+        placemark.getElementsByTagName('coordinates')
+      );
+
+      coordsEls.forEach((coordsEl, coordIdx) => {
+        const coordsText = coordsEl.textContent?.trim() || '';
+        if (!coordsText) return;
+
+        const firstPair = coordsText.split(/\s+/)[0];
+        const parts = firstPair.split(',');
+        if (parts.length < 2) return;
+
+        const lon = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+        if (isNaN(lat) || isNaN(lon)) return;
+
+        const name =
+          coordsEls.length > 1 ? `${baseName}_${coordIdx + 1}` : baseName;
+
+        // KML usually doesn't have type → default to 'terminal'
+        // (you can later improve this if your KML includes <ExtendedData> or description)
+        points.push({ name, type: 'terminal', lat, lng: lon });
+      });
+    });
+
+    return points;
+  };
+
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow uploading the same file name again
@@ -479,7 +528,6 @@ export default function DemoPage() {
   };
 
   const processFile = (file: File) => {
-    // Reset anything derived from the previous CSV so the map + UI refresh cleanly
     setMstEdges([]);
     setMstNodes([]);
     setCostBreakdown(null);
@@ -489,65 +537,87 @@ export default function DemoPage() {
     setFileName(file.name);
     setLoading(true);
 
-    Papa.parse(file, {
-      header: true, // treat first row as headers
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim().toLowerCase(), // normalize headers
-      complete: (result) => {
+    const lowerName = file.name.toLowerCase();
+
+    if (lowerName.endsWith('.kml')) {
+      // ── KML branch ─────────────────────────────────────
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
         try {
-          const rows = result.data as Record<string, string>[];
-
-          const parsedPoints: LocationPoint[] = rows
-            .map((row) => {
-              const name = row.name?.trim() || row['name'] || 'Unnamed';
-              const type = row.type?.trim() || row['type'] || 'Unknown';
-              const latStr = row.latitude || row.lat || '';
-              const lngStr = row.longitude || row.lng || row.logitude || '';
-
-              const lat = parseFloat(latStr);
-              const lng = parseFloat(lngStr);
-
-              if (isNaN(lat) || isNaN(lng)) return null;
-
-              // Validate coordinate precision (require at least 6 decimal places)
-              const latPrecision = (latStr.split('.')[1] || '').length;
-              const lngPrecision = (lngStr.split('.')[1] || '').length;
-
-              if (latPrecision < 6 || lngPrecision < 6) {
-                console.warn(
-                  `Low precision coordinates for ${name}: lat=${latStr} (${latPrecision} decimals), lng=${lngStr} (${lngPrecision} decimals)`
-                );
-                // Still accept but warn - could make this stricter if needed
-              }
-
-              return { name, type, lat, lng };
-            })
-            .filter((p): p is LocationPoint => p !== null);
-
-          console.log('Parsed CSV:', parsedPoints);
-
+          const parsedPoints = parseKml(text);
+          console.log('Parsed KML:', parsedPoints);
           if (parsedPoints.length === 0) {
-            setError(
-              'No valid rows found. Expected columns: Name, Type, Latitude, Longitude (case-insensitive). ' +
-                'Make sure lat/lng are numbers and Type is either "source" or "terminal".'
-            );
-            setDataPoints([]); // ensure old markers stay cleared
+            setError('No valid placemarks found in the KML file.');
+            setDataPoints([]);
           } else {
             setDataPoints(parsedPoints);
           }
         } catch (err) {
-          setError('Error parsing CSV. Please check file format.');
+          setError('Error parsing KML file.');
           console.error(err);
         } finally {
           setLoading(false);
         }
-      },
-      error: (err) => {
-        setError('Failed to read file.');
-        console.error(err);
+      };
+      reader.onerror = () => {
+        setError('Failed to read KML file.');
         setLoading(false);
-      },
-    });
+      };
+      reader.readAsText(file);
+    } else {
+      // ── CSV branch (PapaParse) ─────────────────────────
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim().toLowerCase(),
+        complete: (result) => {
+          try {
+            const rows = result.data as Record<string, string>[];
+
+            const parsedPoints: LocationPoint[] = rows
+              .map((row) => {
+                const name = row.name?.trim() || row['name'] || 'Unnamed';
+                const typeStr = row.type?.trim() || row['type'] || 'terminal';
+                const latStr = row.latitude || row.lat || '';
+                const lngStr = row.longitude || row.lng || row.logitude || '';
+
+                const lat = parseFloat(latStr);
+                const lng = parseFloat(lngStr);
+
+                if (isNaN(lat) || isNaN(lng)) return null;
+
+                const type =
+                  typeStr.toLowerCase() === 'source' ? 'source' : 'terminal';
+
+                return { name, type, lat, lng };
+              })
+              .filter((p): p is LocationPoint => p !== null);
+
+            console.log('Parsed CSV:', parsedPoints);
+
+            if (parsedPoints.length === 0) {
+              setError(
+                'No valid rows found. Expected columns: Name, Type (source/terminal), Latitude, Longitude.'
+              );
+              setDataPoints([]);
+            } else {
+              setDataPoints(parsedPoints);
+            }
+          } catch (err) {
+            setError('Error parsing CSV file.');
+            console.error(err);
+          } finally {
+            setLoading(false);
+          }
+        },
+        error: (err) => {
+          setError('Failed to read file.');
+          console.error(err);
+          setLoading(false);
+        },
+      });
+    }
   };
 
   const generateTestData = (count: number) => {
@@ -630,17 +700,20 @@ export default function DemoPage() {
     setIsDragOver(false);
 
     const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const file = files[0];
-      if (
-        file.type === 'text/csv' ||
-        file.name.toLowerCase().endsWith('.csv')
-      ) {
-        // Process the file directly instead of creating a synthetic event
-        processFile(file);
-      } else {
-        setError('Please drop a CSV file.');
-      }
+    if (files.length === 0) return;
+
+    const file = files[0];
+    const name = file.name.toLowerCase();
+
+    if (
+      file.type === 'text/csv' ||
+      name.endsWith('.csv') ||
+      name.endsWith('.kml') ||
+      file.type === 'application/vnd.google-earth.kml+xml'
+    ) {
+      processFile(file);
+    } else {
+      setError('Please drop a CSV or KML file.');
     }
   };
 
@@ -1040,7 +1113,7 @@ export default function DemoPage() {
           disabled
           className='flex-1 cursor-not-allowed rounded bg-zinc-700 px-10 py-4 text-center font-medium text-zinc-400 sm:flex-none'
         >
-          Sign in to save
+          Sign in to save Mini-Grid
         </button>
       );
     }
@@ -1051,7 +1124,7 @@ export default function DemoPage() {
         disabled={disabled}
         className='flex-1 rounded bg-emerald-600 px-10 py-4 text-center font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
       >
-        Save to My Maps
+        Save to My Mini-Grids
       </button>
     );
   }
@@ -1130,499 +1203,609 @@ export default function DemoPage() {
   };
 
   return (
-    <div className='min-h-screen overflow-hidden bg-zinc-950 text-white'>
-      {/* Hero Header – unchanged */}
-      <header className='relative bg-linear-to-br from-emerald-600 via-teal-700 to-cyan-700 py-28 text-center md:py-32'>
-        <div className='absolute inset-0 bg-[radial-gradient(#ffffff10_1px,transparent_1px)] bg-size-[40px_40px]' />
-        <div className='relative mx-auto max-w-6xl px-6'>
-          <div className='mb-8 inline-flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-6 py-2 backdrop-blur-md'>
-            <span className='text-2xl'>🚀</span>
-            <span className='text-sm font-medium tracking-[4px] uppercase'>
-              C4G - Renewvia Energy Project
-            </span>
+    <div className='flex min-h-screen flex-col bg-zinc-950 text-white'>
+      {/* Hero – slightly more compact */}
+      <header className='relative bg-gradient-to-br from-emerald-700 via-teal-800 to-cyan-900 py-16 text-center md:py-20'>
+        <div className='pointer-events-none absolute inset-0 bg-[radial-gradient(#ffffff0f_1px,transparent_1px)] bg-[length:36px_36px] opacity-50' />
+        <div className='relative mx-auto max-w-6xl px-5'>
+          <div className='mb-5 inline-flex items-center gap-2.5 rounded-full border border-white/20 bg-white/10 px-5 py-1.5 text-sm font-medium tracking-wider uppercase backdrop-blur-md'>
+            <span className='text-xl'>🚀</span>
+            C4G – Renewvia Energy
           </div>
-
-          <h1 className='mb-6 text-6xl font-bold tracking-tighter md:text-7xl lg:text-8xl'>
-            Project Demo
+          <h1 className='mb-3 text-5xl font-extrabold tracking-tight sm:text-6xl md:text-7xl'>
+            Mini-Grid Demo
           </h1>
-          <p className='mb-10 text-3xl font-light text-emerald-100 md:text-4xl lg:text-5xl'>
+          <p className='text-xl font-light text-emerald-100/90 sm:text-2xl'>
             Solar Mini-Grid Powerline Distribution Networks
           </p>
         </div>
       </header>
 
-      <main className='mx-auto max-w-7xl px-6 py-12'>
-        <h2 className='mb-6 text-4xl font-bold'>
-          Mini-Grid Optimization Coordinate and Edges Generation
-        </h2>
-
-        {/* Map Input – Combined Upload / Test Data / Saved Runs Section */}
-        <div className='mb-12 rounded-xl border border-zinc-600 bg-zinc-900/40 p-8 shadow-xl backdrop-blur-md'>
-          <h2 className='mb-8 text-3xl font-bold text-emerald-300'>
-            Map Input
+      <main className='mx-auto w-full max-w-7xl flex-1 py-8'>
+        {/* ── 1. Input Section ──────────────────────────────────────────────── */}
+        <section className='mb-10 md:mb-12'>
+          <h2 className='mb-5 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
+            1. Define Locations
           </h2>
 
-          {/* Upload CSV */}
-          <div className='mb-10'>
-            <label className='mb-3 block text-xl font-medium text-white'>
-              Upload CSV with your locations
-            </label>
-            <p className='mb-4 text-sm text-zinc-400'>
-              Expected columns: <code className='text-emerald-300'>Name</code>,{' '}
-              <code className='text-emerald-300'>Type</code>,{' '}
-              <code className='text-emerald-300'>Latitude</code>,{' '}
-              <code className='text-emerald-300'>Longitude</code>{' '}
-              (case-insensitive)
-            </p>
-            <p className='mb-6 text-sm text-zinc-500'>
-              Example:
-              <br />
-              <code className='mt-1 block text-blue-300'>
-                Georgia Tech, source, 33.77728650, -84.39617097
-                <br />
-                Building 1, terminal, 33.77798650, -84.39613097
-              </code>
-            </p>
-
-            <div
-              className={`relative rounded-lg border-2 border-dashed p-10 text-center transition-all duration-200 ${
-                isDragOver
-                  ? 'scale-[1.01] border-emerald-400 bg-emerald-900/25'
-                  : 'border-zinc-600 hover:border-zinc-500 hover:bg-zinc-950/30'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <div className='space-y-5'>
-                <div className='text-5xl'>📄</div>
-                <div>
-                  <p className='mb-3 text-xl font-medium text-zinc-200'>
-                    {isDragOver
-                      ? 'Drop your CSV file here'
-                      : 'Drag & drop your CSV file here'}
-                  </p>
-                  <p className='text-sm text-zinc-500'>or</p>
-                </div>
-                <label className='inline-block cursor-pointer rounded-lg bg-emerald-600 px-8 py-4 font-semibold text-white shadow-md transition hover:bg-emerald-700 active:scale-95'>
-                  Choose CSV File
-                  <input
-                    type='file'
-                    accept='.csv'
-                    onChange={handleFileUpload}
-                    className='hidden'
-                  />
+          <div className='grid gap-6 lg:grid-cols-15 lg:gap-8'>
+            {/* Left column – controls */}
+            <div className='space-y-6 lg:col-span-6'>
+              {/* Upload card */}
+              {/* Upload CSV or KML – compact version */}
+              <div className='mb-8 rounded-lg border border-zinc-700 bg-zinc-900/50 p-5 backdrop-blur-sm'>
+                <label className='mb-2.5 block text-base font-medium'>
+                  Upload CSV or KML
                 </label>
-              </div>
-            </div>
 
-            <div className='mt-5 flex flex-col gap-2 text-center'>
-              {fileName && (
-                <p className='text-sm text-zinc-300'>
-                  Selected: <span className='font-medium'>{fileName}</span>
-                </p>
-              )}
-              {error && <p className='text-red-400'>{error}</p>}
-              {loading && (
-                <p className='text-emerald-400'>Processing file...</p>
-              )}
-              {dataPoints.length > 0 && !loading && (
-                <p className='font-medium text-emerald-300'>
-                  Loaded {dataPoints.length} valid location
-                  {dataPoints.length !== 1 ? 's' : ''}.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
-
-          {/* Generate Test Data */}
-          <div className='mb-10'>
-            <label className='mb-3 block text-xl font-medium text-white'>
-              Or Generate Random Test Data
-            </label>
-            <p className='mb-5 text-sm text-zinc-400'>
-              Create random location points within ~1 square mile area – great
-              for quick testing or demos.
-            </p>
-
-            <div className='flex flex-wrap items-center gap-5'>
-              <select
-                value={selectedCount}
-                onChange={(e) => setSelectedCount(parseInt(e.target.value))}
-                className='min-w-[140px] rounded-lg border border-zinc-600 bg-zinc-800 px-5 py-3 text-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 focus:outline-none'
-              >
-                {Array.from({ length: 91 }, (_, i) => i + 10).map((num) => (
-                  <option key={num} value={num}>
-                    {num} points
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={() => {
-                  try {
-                    generateTestData(selectedCount);
-                  } catch (err) {
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : 'Failed to generate test data'
-                    );
-                  }
-                }}
-                className='rounded-lg bg-blue-600 px-8 py-3 font-semibold text-white shadow-md transition hover:bg-blue-700 active:scale-95 disabled:opacity-50'
-                disabled={loading}
-              >
-                Generate Test Data
-              </button>
-            </div>
-          </div>
-
-          {/* Divider */}
-          {session?.user && (
-            <>
-              <div className='my-10 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent' />
-
-              {/* Saved Mini-Grids */}
-              <div>
-                <h3 className='mb-5 text-2xl font-semibold text-emerald-200'>
-                  Or Load Saved Mini-Grids ({savedRuns.length}/10)
-                </h3>
-
-                {loadingSaved ? (
-                  <p className='text-emerald-400'>Loading your saved runs...</p>
-                ) : savedRuns.length === 0 ? (
-                  <p className='text-zinc-400 italic'>
-                    You haven&#39;t saved any mini-grid runs yet.
+                {/* Examples – smaller & tighter */}
+                <div className='mb-4 space-y-1.5 text-xs text-zinc-500'>
+                  <p>
+                    CSV example:{' '}
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <button className='text-xs text-emerald-400 underline hover:text-emerald-300'>
+                          view full
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className='sm:max-w-md'>
+                        <DialogHeader>
+                          <DialogTitle>CSV Sample Format</DialogTitle>
+                        </DialogHeader>
+                        <DialogDescription>
+                          <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
+                            {`Name,Type,Latitude,Longitude
+"Georgia Tech",source,33.77728650,-84.39617097
+"Student Center",terminal,33.77680000,-84.39750000
+"Library",terminal,33.77420000,-84.39890000
+"Dorm A",terminal,33.77850000,-84.39510000
+"Cafeteria",terminal,33.77790000,-84.39920000`}
+                          </pre>
+                          <p className='mt-3 text-xs text-zinc-400'>
+                            • Header row required
+                            <br />
+                            • Type: source or terminal
+                            <br />• ≥6 decimal places recommended
+                          </p>
+                        </DialogDescription>
+                        <DialogFooter>
+                          <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
+                            Close
+                          </DialogClose>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </p>
-                ) : (
-                  <div className='grid gap-5 sm:grid-cols-2 lg:grid-cols-3'>
-                    {savedRuns.length >= 10 && session?.user && (
-                      <p className='mt-3 text-center text-sm text-amber-400'>
-                        Maximum of 10 saved mini-grids reached. Delete one to
-                        save more.
+
+                  <p>
+                    KML example:{' '}
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <button className='text-xs text-emerald-400 underline hover:text-emerald-300'>
+                          view full
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className='sm:max-w-md'>
+                        {/* your existing KML content here – same as before */}
+                        <DialogHeader>
+                          <DialogTitle>KML Sample Format</DialogTitle>
+                        </DialogHeader>
+                        <DialogDescription>
+                          <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
+                            {`<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Georgia Tech</name>
+      <Point>
+        <coordinates>-84.39617097,33.77728650,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>Student Center</name>
+      <Point>
+        <coordinates>-84.39750000,33.77680000,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>`}
+                          </pre>
+                        </DialogDescription>
+                        <DialogFooter>
+                          <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
+                            Close
+                          </DialogClose>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </p>
+                </div>
+
+                {/* ── Smaller drag & drop area ── */}
+                <div
+                  className={`relative rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
+                    isDragOver
+                      ? 'border-emerald-400 bg-emerald-900/25'
+                      : 'border-zinc-700 hover:border-zinc-600'
+                  }`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <div className='flex flex-wrap items-center justify-center gap-4'>
+                    {/* Icon left */}
+                    <div className='flex-shrink-0 text-3xl opacity-90'>📄</div>
+
+                    {/* Text + button right */}
+                    <div className='flex flex-col items-center gap-2'>
+                      <p className='text-base font-medium text-zinc-200'>
+                        {isDragOver ? 'Drop file here' : 'Drag & drop or click'}
+                      </p>
+
+                      <label className='inline-flex cursor-pointer items-center rounded bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700 active:scale-97'>
+                        Select File
+                        <input
+                          type='file'
+                          accept='.csv,.kml'
+                          onChange={handleFileUpload}
+                          className='hidden'
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status messages – smaller & tighter */}
+                <div className='mt-3 text-center text-sm'>
+                  <div className='flex flex-wrap items-center justify-center gap-x-6 gap-y-1.5'>
+                    {/* Selected file */}
+                    {fileName && (
+                      <p className='truncate font-medium text-zinc-300'>
+                        Selected:{' '}
+                        <span className='text-zinc-400'>{fileName}</span>
                       </p>
                     )}
 
-                    {savedRuns.map((run) => (
-                      <div
-                        key={run.id}
-                        className='group relative cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900/70 p-5 transition-all hover:border-emerald-600/60 hover:bg-zinc-900 hover:shadow-lg'
-                      >
-                        {/* Delete button – top right corner */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation(); // prevent card click / load
-                            handleDeleteRun(run.id, run.name);
-                          }}
-                          className='absolute top-3 right-3 z-10 rounded-full bg-red-900/70 p-2 text-red-300 opacity-70 transition hover:bg-red-800 hover:opacity-100'
-                          title='Delete this mini-grid'
-                        >
-                          <svg
-                            xmlns='http://www.w3.org/2000/svg'
-                            className='h-5 w-5'
-                            fill='none'
-                            viewBox='0 0 24 24'
-                            stroke='currentColor'
-                          >
-                            <path
-                              strokeLinecap='round'
-                              strokeLinejoin='round'
-                              strokeWidth={2}
-                              d='M6 18L18 6M6 6l12 12'
-                            />
-                          </svg>
-                        </button>
-
-                        <div onClick={() => loadSavedRun(run)}>
-                          <h4 className='mb-2 font-semibold text-emerald-300 group-hover:text-emerald-200'>
-                            {run.name || 'Untitled Run'}
-                          </h4>
-                          <p className='mb-2 text-sm text-zinc-400'>
-                            {run.fileName
-                              ? `From: ${run.fileName}`
-                              : 'Test data / manual input'}
-                          </p>
-                          <div className='text-xs text-zinc-500'>
-                            {new Date(run.createdAt).toLocaleString()} •{' '}
-                            {run.mstNodes?.length || '?'} nodes
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                    {/* Loaded count – shown only when successful */}
+                    {dataPoints.length > 0 && !loading && (
+                      <p className='font-medium text-emerald-300'>
+                        Loaded {dataPoints.length} point
+                        {dataPoints.length !== 1 ? 's' : ''}
+                      </p>
+                    )}
                   </div>
+
+                  {/* Error or Loading – full width below if present */}
+                  {error && <p className='mt-1.5 text-red-400'>{error}</p>}
+
+                  {loading && (
+                    <p className='mt-1.5 animate-pulse text-emerald-400'>
+                      Processing…
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Generate Test Data – compact & reliable */}
+              <div className='rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-5 shadow-inner backdrop-blur-sm'>
+                <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
+                  Generate Test Data
+                </h3>
+                <p className='mb-4 text-sm leading-snug text-zinc-400'>
+                  Random points in ~1 mi² area – good for quick testing
+                </p>
+
+                <div className='flex flex-wrap items-center gap-4'>
+                  <select
+                    value={selectedCount}
+                    onChange={(e) => setSelectedCount(Number(e.target.value))}
+                    className='min-w-[140px] rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                    disabled={loading}
+                  >
+                    {Array.from({ length: 91 }, (_, i) => i + 10).map((n) => (
+                      <option key={n} value={n}>
+                        {n} points
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={async () => {
+                      if (loading) return;
+                      setLoading(true);
+                      setError(null); // clear previous errors
+
+                      try {
+                        await generateTestData(selectedCount); // ← make sure this is async if it does any async work
+                        console.log(
+                          `Generated ${selectedCount} test points successfully`
+                        );
+                      } catch (err) {
+                        const msg =
+                          err instanceof Error
+                            ? err.message
+                            : 'Failed to generate test data';
+                        setError(msg);
+                        console.error('Test data generation failed:', err);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    className={`rounded-lg px-6 py-2.5 text-sm font-medium text-white transition-all ${
+                      loading
+                        ? 'cursor-wait bg-blue-700/60'
+                        : 'bg-blue-600 shadow-sm hover:bg-blue-700 active:scale-97'
+                    } `}
+                  >
+                    {loading ? (
+                      <span className='flex items-center gap-2'>
+                        <svg
+                          className='h-4 w-4 animate-spin'
+                          viewBox='0 0 24 24'
+                        >
+                          <circle
+                            className='opacity-25'
+                            cx='12'
+                            cy='12'
+                            r='10'
+                            stroke='currentColor'
+                            strokeWidth='4'
+                            fill='none'
+                          />
+                          <path
+                            className='opacity-75'
+                            fill='currentColor'
+                            d='M4 12a8 8 0 018-8v8h8a8 8 0 01-16 0z'
+                          />
+                        </svg>
+                        Generating…
+                      </span>
+                    ) : (
+                      'Generate'
+                    )}
+                  </button>
+                </div>
+
+                {/* Error display (if any) */}
+                {error && (
+                  <p className='mt-3 text-center text-sm text-red-400'>
+                    {error}
+                  </p>
                 )}
               </div>
-            </>
-          )}
-        </div>
 
-        {/* Cost Inputs & Calculate Section */}
-        <div className='mt-12 rounded-lg border border-zinc-700 bg-zinc-900/50 p-8 backdrop-blur-sm'>
-          <h3 className='mb-6 text-3xl font-bold'>Input Variables</h3>
-          <p className='mb-6 text-zinc-300'>
-            Enter approximate costs per unit. The algorithm will process these
-            values as hyperparameters and calculate locations for Poles, Wire,
-            and transformers.
-          </p>
-          <p className='mb-4 text-sm text-zinc-500'>
-            Example: Pole $175.00, Low Voltage $2.75/m, High Voltage $4.25/m
-          </p>
+              {/* Saved runs (only visible when logged in) */}
+              {session?.user && (
+                <div className='rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-5 shadow-inner backdrop-blur-sm'>
+                  <h3 className='mb-4 text-lg font-semibold text-zinc-100'>
+                    Saved Mini-Grids ({savedRuns.length}/10)
+                  </h3>
 
-          <div className='grid gap-6 md:grid-cols-3'>
-            <div>
-              <label className='mb-2 block text-sm font-medium'>
-                Cost per Pole ($)
-              </label>
-              <input
-                type='number'
-                step='0.01'
-                min='0'
-                value={poleCost}
-                onChange={(e) => setPoleCost(parseFloat(e.target.value))}
-                className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-              />
+                  {loadingSaved ? (
+                    <p className='py-4 text-sm text-emerald-400'>Loading…</p>
+                  ) : savedRuns.length === 0 ? (
+                    <p className='py-4 text-sm text-zinc-500 italic'>
+                      No saved runs yet
+                    </p>
+                  ) : (
+                    <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-[140px] overflow-y-auto pr-2'>
+                      <div className='grid gap-4 sm:grid-cols-2'>
+                        {savedRuns.map((run) => (
+                          <div
+                            key={run.id}
+                            className='group relative cursor-pointer rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 transition-all hover:border-emerald-700/50 hover:bg-zinc-900/60'
+                            onClick={() => loadSavedRun(run)}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteRun(run.id, run.name);
+                              }}
+                              className='absolute top-2 right-2 rounded-full bg-red-900/60 p-1.5 text-red-300 opacity-70 transition hover:opacity-100'
+                              title='Delete run'
+                            >
+                              <svg
+                                className='h-4 w-4'
+                                fill='none'
+                                stroke='currentColor'
+                                viewBox='0 0 24 24'
+                              >
+                                <path
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                  strokeWidth={2}
+                                  d='M6 18L18 6M6 6l12 12'
+                                />
+                              </svg>
+                            </button>
+
+                            <h4 className='truncate font-medium text-emerald-300/90 group-hover:text-emerald-200'>
+                              {run.name || 'Untitled'}
+                            </h4>
+                            <p className='mt-1 text-xs text-zinc-500'>
+                              {run.fileName
+                                ? `File: ${run.fileName}`
+                                : 'Test data'}
+                            </p>
+                            <p className='mt-0.5 text-xs text-zinc-600'>
+                              {new Date(run.createdAt).toLocaleDateString()} •{' '}
+                              {run.mstNodes?.length || '?'} nodes
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {savedRuns.length >= 10 && (
+                    <p className='mt-3 text-center text-xs text-amber-400'>
+                      Limit reached (10). Delete one to save more.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div>
-              <label className='mb-2 block text-sm font-medium'>
-                Low Voltage Wire ($/meter)
-              </label>
-              <input
-                type='number'
-                step='0.01'
-                min='0'
-                value={lowVoltageCost}
-                onChange={(e) => setLowVoltageCost(parseFloat(e.target.value))}
-                className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-              />
-            </div>
-
-            <div>
-              <label className='mb-2 block text-sm font-medium'>
-                High Voltage Wire ($/meter)
-              </label>
-              <input
-                type='number'
-                step='0.01'
-                min='0'
-                value={highVoltageCost}
-                onChange={(e) => setHighVoltageCost(parseFloat(e.target.value))}
-                className='w-full rounded border border-zinc-600 bg-zinc-800 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none'
-              />
-            </div>
-          </div>
-
-          <div className='mt-6 flex gap-4'>
-            <button
-              onClick={generateRandomCosts}
-              className='rounded bg-zinc-700 px-6 py-2 text-sm font-medium text-white hover:bg-zinc-600'
-            >
-              Generate Random Costs
-            </button>
-          </div>
-        </div>
-
-        <div className='mt-12 rounded-lg border border-zinc-700 bg-zinc-900/50 p-8 backdrop-blur-sm'>
-          <div className='flex justify-center'>
-            <button
-              onClick={handleRunOptimization}
-              disabled={computingMst || dataPoints.length < 2}
-              className='rounded bg-purple-600 px-10 py-5 text-lg font-bold text-white shadow-lg shadow-purple-900/30 transition-all hover:bg-purple-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
-            >
-              {computingMst
-                ? 'Running Optimization...'
-                : 'Run Optimization Algorithm'}
-            </button>
-          </div>
-
-          <p className='mt-6 text-center text-sm text-zinc-500'>
-            Note: In Development - In beta until April 26th 2026. Only Low
-            Voltage
-          </p>
-
-          {calculationResult && (
-            <div className='mt-8 rounded border border-zinc-700 bg-zinc-800/80 p-6'>
-              <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
-                Result from Python Script:
-              </h4>
-              <pre className='max-h-96 overflow-auto rounded bg-zinc-950/50 p-4 text-sm whitespace-pre-wrap text-emerald-200'>
-                {calculationResult}
-              </pre>
-            </div>
-          )}
-
-          {calcError && (
-            <p className='mt-6 text-center font-medium text-red-400'>
-              {calcError}
-            </p>
-          )}
-        </div>
-
-        {/* Map container */}
-        <div
-          ref={mapRef}
-          className='mt-8 h-[70vh] w-full rounded-xl border border-zinc-700 shadow-2xl'
-        >
-          Loading satellite map...
-        </div>
-        {costBreakdown && (
-          <div className='mt-8 rounded-lg border border-emerald-700/30 bg-zinc-900/70 p-6 backdrop-blur-sm'>
-            <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
-              Estimated Mini-Grid Costs
-            </h4>
-
-            {/* Summary Totals */}
-            <div className='mb-6 grid gap-4 md:grid-cols-2'>
-              <div>
-                <p className='text-sm text-zinc-400'>Total Wire Length</p>
-                <p className='text-xl font-medium text-white'>
-                  {formatMeters(costBreakdown.totalMeters) ?? '0'} m ≈{' '}
-                </p>
-              </div>
-
-              <div className='text-right'>
-                <p className='text-sm text-zinc-400'>Grand Total Estimate</p>
-                <p className='text-2xl font-bold text-emerald-300'>
-                  ${formatUSD(costBreakdown.grandTotal) ?? '0.00'}
-                </p>
-              </div>
-            </div>
-
-            {/* Detailed Breakdown */}
-            <div className='grid gap-6 md:grid-cols-3'>
-              {/* Poles */}
-              <div className='rounded bg-zinc-800/50 p-4'>
-                <p className='text-sm text-zinc-400'>Poles (est.)</p>
-                <p className='text-lg font-medium text-emerald-400'>
-                  {costBreakdown.poleCount ?? '—'} units @ ${poleCost}
-                </p>
-                <p className='text-base font-semibold'>
-                  ${formatUSD(costBreakdown.poleCost) ?? '0.00'}
-                </p>
-              </div>
-
-              {/* Low Voltage */}
-              <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
-                <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
-                <p className='text-lg font-medium text-blue-300'>
-                  {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m @ $
-                  {lowVoltageCost}
-                </p>
-                <p className='text-base font-semibold'>
-                  ${formatUSD(costBreakdown.lowWireCost) ?? '0.00'}
-                </p>
-              </div>
-
-              {/* High Voltage */}
-              <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
-                <p className='text-sm text-zinc-400'>High Voltage Wire</p>
-                <p className='text-lg font-medium text-purple-300'>
-                  {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m @ $
-                  {highVoltageCost}
-                </p>
-                <p className='text-base font-semibold'>
-                  ${formatUSD(costBreakdown.highWireCost) ?? '0.00'}
-                </p>
+            {/* Map – takes more space */}
+            <div className='lg:col-span-9'>
+              <div
+                ref={mapRef}
+                className='h-[55vh] w-full rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl sm:h-[65vh] lg:h-[75vh]'
+              >
+                Loading satellite map…
               </div>
             </div>
           </div>
-        )}
-        {/* Script loader */}
-        <Script
-          src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=marker`}
-          strategy='afterInteractive'
-          onLoad={initMap}
-        />
-      </main>
+        </section>
 
-      {/* Nodes List – Collapsible */}
-      {dataPoints.length > 0 && (
-        <section className='mx-auto max-w-7xl px-6 py-12'>
-          <details className='group'>
-            <summary className='flex cursor-pointer items-center justify-between rounded-lg border border-zinc-700 bg-zinc-900/70 px-6 py-4 text-xl font-bold text-white transition hover:bg-zinc-800/70'>
-              <h3>
-                Source, Destination, and Generated Pole Coordinates (
-                {mstNodes.length || dataPoints.length})
+        {/* ── 2. Costs & Optimization ──────────────────────────────────────── */}
+        <section className='mb-10 md:mb-12'>
+          <h2 className='mb-5 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
+            2. Costs & Optimization
+          </h2>
+
+          <div className='grid gap-6 md:grid-cols-2 lg:gap-8'>
+            {/* Cost inputs */}
+            <div className='rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-6 backdrop-blur-sm'>
+              <h3 className='mb-5 text-xl font-semibold text-zinc-100'>
+                Cost Parameters
               </h3>
-              <span className='text-2xl font-light transition-transform group-open:rotate-180'>
-                ▼
-              </span>
-            </summary>
+              <div className='grid gap-5 sm:grid-cols-3'>
+                {/* Pole cost */}
+                <div>
+                  <label className='mb-1.5 block text-sm font-medium text-zinc-300'>
+                    Pole ($)
+                  </label>
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={poleCost}
+                    onChange={(e) => setPoleCost(parseFloat(e.target.value))}
+                    className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                  />
+                </div>
+                {/* Low voltage */}
+                <div>
+                  <label className='mb-1.5 block text-sm font-medium text-zinc-300'>
+                    Low Voltage ($/m)
+                  </label>
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={lowVoltageCost}
+                    onChange={(e) =>
+                      setLowVoltageCost(parseFloat(e.target.value))
+                    }
+                    className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                  />
+                </div>
+                {/* High voltage */}
+                <div>
+                  <label className='mb-1.5 block text-sm font-medium text-zinc-300'>
+                    High Voltage ($/m)
+                  </label>
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={highVoltageCost}
+                    onChange={(e) =>
+                      setHighVoltageCost(parseFloat(e.target.value))
+                    }
+                    className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                  />
+                </div>
+              </div>
 
-            <div className='mt-4 rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-              <div className='max-h-[60vh] overflow-y-auto font-mono text-sm text-zinc-300'>
+              <button
+                onClick={generateRandomCosts}
+                className='mt-5 text-sm text-emerald-400 underline-offset-2 hover:text-emerald-300 hover:underline'
+              >
+                Use realistic random values
+              </button>
+            </div>
+
+            {/* Run button area */}
+            <div className='flex flex-col items-center justify-center rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-6 text-center backdrop-blur-sm'>
+              <button
+                onClick={handleRunOptimization}
+                disabled={computingMst || dataPoints.length < 2}
+                className='w-full max-w-md rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50'
+              >
+                {computingMst ? 'Optimizing…' : 'Run Optimization'}
+              </button>
+
+              <p className='mt-4 text-xs text-zinc-500'>
+                Beta • Low Voltage Only • Limited to Single Power Source
+              </p>
+
+              {calcError && (
+                <p className='mt-5 text-sm font-medium text-red-400'>
+                  {calcError}
+                </p>
+              )}
+
+              {calculationResult && (
+                <div className='mt-6 w-full rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-left'>
+                  <h4 className='mb-2 text-sm font-semibold text-emerald-300'>
+                    Python result:
+                  </h4>
+                  <pre className='overflow-x-auto text-xs text-emerald-200/90'>
+                    {calculationResult}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Cost breakdown (when available) */}
+        {costBreakdown && (
+          <section className='mb-10 md:mb-12'>
+            <h2 className='mb-5 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
+              Estimated Costs
+            </h2>
+            {costBreakdown && (
+              <div className='mt-8 rounded-lg border border-emerald-700/30 bg-zinc-900/70 p-6 backdrop-blur-sm'>
+                <h4 className='mb-4 text-xl font-semibold text-emerald-300'>
+                  Estimated Mini-Grid Costs
+                </h4>
+
+                {/* Summary Totals */}
+                <div className='mb-6 grid gap-4 md:grid-cols-2'>
+                  <div>
+                    <p className='text-sm text-zinc-400'>Total Wire Length</p>
+                    <p className='text-xl font-medium text-white'>
+                      {formatMeters(costBreakdown.totalMeters) ?? '0'} m ≈{' '}
+                    </p>
+                  </div>
+
+                  <div className='text-right'>
+                    <p className='text-sm text-zinc-400'>
+                      Grand Total Estimate
+                    </p>
+                    <p className='text-2xl font-bold text-emerald-300'>
+                      ${formatUSD(costBreakdown.grandTotal) ?? '0.00'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Detailed Breakdown */}
+                <div className='grid gap-6 md:grid-cols-3'>
+                  {/* Poles */}
+                  <div className='rounded bg-zinc-800/50 p-4'>
+                    <p className='text-sm text-zinc-400'>Poles (est.)</p>
+                    <p className='text-lg font-medium text-emerald-400'>
+                      {costBreakdown.poleCount ?? '—'} units @ ${poleCost}
+                    </p>
+                    <p className='text-base font-semibold'>
+                      ${formatUSD(costBreakdown.poleCost) ?? '0.00'}
+                    </p>
+                  </div>
+
+                  {/* Low Voltage */}
+                  <div className='rounded border-l-4 border-blue-500 bg-zinc-800/50 p-4'>
+                    <p className='text-sm text-zinc-400'>Low Voltage Wire</p>
+                    <p className='text-lg font-medium text-blue-300'>
+                      {formatMeters(costBreakdown.lowVoltageMeters) ?? '0'} m @
+                      ${lowVoltageCost}
+                    </p>
+                    <p className='text-base font-semibold'>
+                      ${formatUSD(costBreakdown.lowWireCost) ?? '0.00'}
+                    </p>
+                  </div>
+
+                  {/* High Voltage */}
+                  <div className='rounded border-l-4 border-purple-500 bg-zinc-800/50 p-4'>
+                    <p className='text-sm text-zinc-400'>High Voltage Wire</p>
+                    <p className='text-lg font-medium text-purple-300'>
+                      {formatMeters(costBreakdown.highVoltageMeters) ?? '0'} m @
+                      ${highVoltageCost}
+                    </p>
+                    <p className='text-base font-semibold'>
+                      ${formatUSD(costBreakdown.highWireCost) ?? '0.00'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Nodes list – collapsible */}
+        {dataPoints.length > 0 && (
+          <section className='mb-10 md:mb-12'>
+            <details className='group'>
+              <summary className='flex cursor-pointer items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 px-6 py-4 text-lg font-semibold transition hover:bg-zinc-800/70'>
+                <span>
+                  Coordinates ({mstNodes.length || dataPoints.length})
+                </span>
+                <span className='text-xl transition-transform group-open:rotate-180'>
+                  ▼
+                </span>
+              </summary>
+              <div className='mt-3 max-h-[50vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 font-mono text-sm text-zinc-300'>
                 {(mstNodes.length > 0 ? mstNodes : dataPoints).map(
-                  (point, index) => (
-                    <div key={index} className='mb-1.5 leading-relaxed'>
-                      {index + 1}.{' '}
-                      <span className='font-semibold text-emerald-300'>
+                  (point, i) => (
+                    <div key={i} className='mb-1.5'>
+                      {i + 1}.{' '}
+                      <span className='font-medium text-emerald-300'>
                         {point.name}
-                      </span>
-                      {' – Lat: '}
-                      <span className='text-blue-300'>
-                        {point.lat.toFixed(8)}
-                      </span>
-                      ,{' Lng: '}
-                      <span className='text-blue-300'>
-                        {point.lng.toFixed(8)}
-                      </span>
+                      </span>{' '}
+                      – {point.lat.toFixed(8)}, {point.lng.toFixed(8)}
                     </div>
                   )
                 )}
               </div>
+            </details>
+          </section>
+        )}
 
-              {/* Optional footer info */}
-              {mstNodes.length > 0 && (
-                <p className='mt-4 text-center text-xs text-zinc-500'>
-                  Showing optimized nodes (source + terminals + poles). Scroll
-                  for full list.
-                </p>
-              )}
+        {/* Export area */}
+        {costBreakdown && mstNodes.length > 0 && (
+          <section className='mb-12'>
+            <div className='rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-center'>
+              <h3 className='mb-5 text-xl font-semibold text-emerald-300'>
+                Export Options
+              </h3>
+              <div className='mx-auto flex max-w-md flex-col justify-center gap-4 sm:flex-row'>
+                {/* Download KML button */}
+                <button
+                  onClick={downloadKml}
+                  disabled={mstNodes.length === 0 || mstEdges.length === 0}
+                  className='flex-1 rounded-lg bg-purple-600/90 px-8 py-3.5 text-base font-medium transition hover:bg-purple-700 disabled:opacity-50'
+                >
+                  Download KML
+                </button>
+
+                {/* Save button (your component) */}
+                <SaveMiniGridButton
+                  isAuthenticated={!!session?.user}
+                  onSave={handleSaveToDatabase}
+                  disabled={
+                    computingMst ||
+                    mstNodes.length === 0 ||
+                    savedRuns.length >= 10
+                  }
+                />
+              </div>
             </div>
-          </details>
-        </section>
-      )}
+          </section>
+        )}
+      </main>
 
-      {costBreakdown && mstNodes.length > 0 && (
-        <section className='mx-auto max-w-7xl px-6 py-12'>
-          <div className='mx-auto mt-8 max-w-2xl rounded-lg border border-zinc-700 bg-zinc-900/50 p-6 backdrop-blur-sm'>
-            <h4 className='mb-5 text-center text-xl font-semibold text-emerald-300'>
-              Export Results
-            </h4>
-
-            <div className='flex flex-col justify-center gap-5 sm:flex-row'>
-              <button
-                onClick={downloadKml}
-                className='flex-1 rounded bg-purple-600 px-10 py-4 text-center font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none'
-                disabled={mstNodes.length === 0 || mstEdges.length === 0}
-              >
-                Download KML
-              </button>
-
-              <SaveMiniGridButton
-                isAuthenticated={!!session?.user}
-                onSave={handleSaveToDatabase}
-                disabled={
-                  computingMst ||
-                  mstNodes.length === 0 ||
-                  savedRuns.length >= 10
-                }
-              />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Footer */}
-      <footer className='border-t border-zinc-800 py-12 text-center text-sm text-zinc-500'>
-        <p>
-          © 2026 • CS 6150 Computing For Good • Renewvia Project • Demo Page
-        </p>
+      <footer className='mt-auto border-t border-zinc-800 py-8 text-center text-sm text-zinc-600'>
+        © 2026 • CS 6150 Computing For Good • Renewvia Project Demo
       </footer>
+
+      <Script
+        src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=marker`}
+        strategy='afterInteractive'
+        onLoad={initMap}
+      />
     </div>
   );
 }

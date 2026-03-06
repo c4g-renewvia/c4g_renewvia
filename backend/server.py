@@ -4,11 +4,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY  # or wherever
-from mini_grid_solver.src.utils.models import OptimizationRequest
+from mini_grid_solver.src.utils.models import SolverRequest
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Renewvia MST Optimizer")
+app = FastAPI(title="Renewvia MST Solver")
 
 # Allow frontend to call this (update for production domain)
 app.add_middleware(
@@ -25,7 +25,7 @@ app.add_middleware(
 
 
 @app.post("/solve")
-async def optimize(request: OptimizationRequest):
+async def optimize(request: SolverRequest):
     if len(request.points) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 points")
 

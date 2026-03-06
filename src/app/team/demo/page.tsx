@@ -199,6 +199,11 @@ export default function DemoPage() {
   ) => {
     const type = point.type || 'terminal'; // raw uploaded points → treat as 'terminal'
 
+    let displayTitle = point.name;
+    if (point.type && !point.name.toLowerCase().includes(`(${point.type}`)) {
+      displayTitle = `${point.name} (${point.type})`;
+    }
+
     let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
     let labelColor = 'white';
     let scaledSize = new google.maps.Size(36, 36);
@@ -254,7 +259,7 @@ export default function DemoPage() {
       position: { lat: point.lat, lng: point.lng },
       map,
       content,
-      title: point.type ? `${point.name} (${point.type})` : point.name,
+      title: displayTitle,
       gmpDraggable: true,
     });
 
@@ -767,21 +772,51 @@ export default function DemoPage() {
     const debug = true;
 
     try {
+      // ────────────────────────────────────────────────
+      // Only send ORIGINAL points (source + terminals)
+      // Filter out anything that is a 'pole'
+      // ────────────────────────────────────────────────
+      const originalPoints = markersRef.current
+        .map((marker) => {
+          const pos = toLiteral(marker.position);
+          if (!pos) return null;
+
+          // Extract type from title or from custom property if you added one
+          const title = marker.title || '';
+          const isPole = title.toLowerCase().includes('pole');
+
+          // You can also check marker.content if you want to be more robust
+          return {
+            lat: pos.lat,
+            lng: pos.lng,
+            name: marker.title ?? null,
+            type: isPole ? 'pole' : 'terminal', // fallback
+          };
+        })
+        .filter(
+          (p): p is { lat: number; lng: number; name: string; type: string } =>
+            p !== null
+        )
+        .filter((p) => p.type !== 'pole') // ← the important line
+        .map((p) => ({
+          lat: p.lat,
+          lng: p.lng,
+          name: p.name,
+        }));
+
+      if (originalPoints.length < 2) {
+        alert('No valid source/terminal points found to optimize.');
+        setComputingMst(false);
+        return;
+      }
+
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           solver: selectedSolver,
           params: {},
-          points: markersRef.current.map((marker) => {
-            const pos = marker.position as google.maps.LatLngLiteral; // or just as { lat: number; lng: number }
-
-            return {
-              lat: pos.lat,
-              lng: pos.lng,
-              name: marker.title ?? null,
-            };
-          }),
+          points: originalPoints,
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,

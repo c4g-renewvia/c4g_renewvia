@@ -3,7 +3,7 @@ import { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Project Demo • Renewvia',
   description:
-    'Live demo & interactive showcase – Solar Mini-Grid Powerline Optimization',
+    'Live demo & interactive showcase – Solar Mini-Grid Powerline Solver',
   icons: { icon: '/favicon.ico' },
 };
 

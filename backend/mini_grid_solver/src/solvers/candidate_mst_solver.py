@@ -29,11 +29,11 @@ class CandidateMSTSolver(BaseMiniGridSolver):
     Exists mainly as reference / regression test baseline.
     """
 
-    def __init__(self, request: OptimizationRequest):
+    def __init__(self, request: SolverRequest):
         """
 
         Args:
-            - request: OptimizationRequest object containing all necessary parameters.
+            - request: SolverRequest object containing all necessary parameters.
             - candidate_algorithm: specifying the algorithm to use for generating candidates.
                 `voronoi` for Voronoi vertices, `fermat` for Fermat-Torricelli points.
         """
@@ -502,7 +502,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return filtered
 
-    def solve(self) -> OptimizationResult:
+    def solve(self) -> SolverResult:
         coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         # 1. Candidates
@@ -636,7 +636,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 # from .build_graph import *
 #
 #
-# def compute_mst(request: OptimizationRequest) -> Dict[str, Any]:
+# def compute_mst(request: SolverRequest) -> Dict[str, Any]:
 #     """
 #     Compute a realistic power distribution network using MST with intermediate poles.
 #     Returns serialized dict ready for JSON response.
@@ -799,7 +799,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 #         ]
 #
 #     # ─── 11. Build & return validated result ────────────────────────────────
-#     result = OptimizationResult(
+#     result = SolverResult(
 #         edges=edges,
 #         nodes=output_nodes,
 #         totalLowVoltageMeters=round(total_low_m, 2),

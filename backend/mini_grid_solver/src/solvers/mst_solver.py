@@ -8,7 +8,7 @@ from .registry import register_solver
 from ..utils.models import (
     Node,
     OutputEdge,
-    OptimizationResult,
+    SolverResult,
 )
 
 
@@ -26,7 +26,7 @@ class SimpleMSTSolver(BaseMiniGridSolver):
     Good as a baseline / lower bound reference.
     """
 
-    def solve(self) -> OptimizationResult:
+    def solve(self) -> SolverResult:
         # 1. Parse input
         coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 

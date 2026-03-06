@@ -13,8 +13,8 @@ class BaseMiniGridSolver(ABC):
     Abstract base class for MiniGrid power network optimizers.
 
     Subclasses implement different algorithms/heuristics while agreeing on:
-      - Input  = OptimizationRequest
-      - Output = OptimizationResult (edges, nodes, metrics, optional debug)
+      - Input  = SolverRequest
+      - Output = SolverResult (edges, nodes, metrics, optional debug)
 
     No assumptions are made about:
       - Use of candidate poles
@@ -24,7 +24,7 @@ class BaseMiniGridSolver(ABC):
       - Cost model details
     """
 
-    def __init__(self, request: OptimizationRequest):
+    def __init__(self, request: SolverRequest):
         self.request = request
         self._coords: Optional[np.ndarray] = None
         self._source_idx: Optional[int] = None
@@ -76,12 +76,12 @@ class BaseMiniGridSolver(ABC):
         return 6371000 * c  # shape (n_candidates, n_buildings)
 
     @staticmethod
-    def parse_input(request: OptimizationRequest):
+    def parse_input(request: SolverRequest):
         """
         Parses input request containing information about geographical points, costs, and their attributes to generate structured
         data suitable for optimization tasks.
 
-        This function processes the input `OptimizationRequest` to extract coordinates, their names, and classify one of the
+        This function processes the input `SolverRequest` to extract coordinates, their names, and classify one of the
         locations as the "Power Source". It ensures that the input contains at least two valid points, assigns a "Power Source"
         if not explicitly provided, and organizes the remaining points as terminals. The function also validates and cleans input
         data for consistency.
@@ -148,9 +148,9 @@ class BaseMiniGridSolver(ABC):
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
-    def solve(self) -> OptimizationResult:
+    def solve(self) -> SolverResult:
         """
-        Main entry point: take the request → produce full OptimizationResult.
+        Main entry point: take the request → produce full SolverResult.
 
         This is the only method most users / tests should call directly.
         """
@@ -188,9 +188,9 @@ class BaseMiniGridSolver(ABC):
             total_high_m: float = 0.0,
             num_poles: int = 0,
             debug_info: Optional[Dict[str, Any]] = None,
-    ) -> OptimizationResult:
+    ) -> SolverResult:
         """
-        Helper to construct a valid OptimizationResult from the most common pieces.
+        Helper to construct a valid SolverResult from the most common pieces.
         Many simple algorithms can just produce edges + used nodes and call this.
         """
         pole_cost = self._costs.get("poleCost", 1500.0)
@@ -213,7 +213,7 @@ class BaseMiniGridSolver(ABC):
             for n in used_nodes
         ]
 
-        return OptimizationResult(
+        return SolverResult(
             edges=edges,
             nodes=node_dicts,
             totalLowVoltageMeters=round(total_low_m, 2),

@@ -4,7 +4,7 @@ from typing import Union
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class OptimizationRequest(BaseModel):
+class SolverRequest(BaseModel):
     """Pydantic model for incoming optimization request from frontend.
 
     Args:
@@ -50,7 +50,7 @@ class OutputEdge(BaseModel):
     voltage: Literal["low", "high", "unknown"] = "unknown"
 
 
-class OptimizationResult(BaseModel):
+class SolverResult(BaseModel):
     edges: List[OutputEdge]
     nodes: List[Dict[str, Any]]  # minimal dicts for frontend (lat,lng,name,type,index,...)
     totalLowVoltageMeters: float = 0.0

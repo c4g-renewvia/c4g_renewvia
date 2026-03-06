@@ -1,7 +1,7 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'C4G Renewvia Project Team • Solar Mini-Grid Optimization',
+  title: 'C4G Renewvia Project Team • Solar Mini-Grid Solver',
   description:
     'Volunteer Project 7: Solar Mini-Grid Powerline Distribution Networks',
   icons: { icon: '/favicon.ico' },
@@ -14,7 +14,7 @@ const teamMembers = [
     role: 'Team Lead',
     skills: [
       'Machine Learning',
-      'Optimization',
+      'Solver',
       'Python',
       'Data Science',
       'Big Data',
@@ -42,7 +42,7 @@ const teamMembers = [
     initials: 'ET',
     role: 'Team Member',
     skills: [
-      'Optimization',
+      'Solver',
       'Machine Learning',
       'Python Prototyping',
       'Customer Education',

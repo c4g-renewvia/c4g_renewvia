@@ -19,7 +19,7 @@ export default function Home() {
         <h1 className='text-4xl font-semibold tracking-tight text-balance text-white sm:text-6xl'>
           Renewvia Mini-Grid{' '}
           <span className='bg-linear-to-r from-emerald-300 via-sky-300 to-violet-300 bg-clip-text text-transparent'>
-            Optimization
+            Solver
           </span>{' '}
           Project
         </h1>
@@ -62,9 +62,7 @@ export default function Home() {
               <div className='text-xs tracking-wide text-white/50 uppercase'>
                 Focus
               </div>
-              <div className='mt-1 font-medium text-white'>
-                Tree Optimization
-              </div>
+              <div className='mt-1 font-medium text-white'>Tree Solver</div>
             </div>
             <div>
               <div className='text-xs tracking-wide text-white/50 uppercase'>

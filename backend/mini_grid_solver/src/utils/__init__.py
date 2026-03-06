@@ -1,1 +1,1 @@
-from .models import OptimizationRequest
+from .models import SolverRequest

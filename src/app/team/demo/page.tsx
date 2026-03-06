@@ -1489,7 +1489,7 @@ export default function DemoPage() {
                       No saved runs yet
                     </p>
                   ) : (
-                    <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-[140px] overflow-y-auto pr-2'>
+                    <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-[292px] overflow-y-auto pr-2'>
                       <div className='grid gap-4 sm:grid-cols-2'>
                         {savedRuns.map((run) => (
                           <div
@@ -1529,7 +1529,7 @@ export default function DemoPage() {
                                 : 'Test data'}
                             </p>
                             <p className='mt-0.5 text-xs text-zinc-600'>
-                              {new Date(run.createdAt).toLocaleDateString()} •{' '}
+                              {new Date(run.createdAt).toLocaleString()} <br />
                               {run.mstNodes?.length || '?'} nodes
                             </p>
                           </div>

@@ -377,14 +377,19 @@ export default function DemoPage() {
 
   // Add markers and fit bounds whenever dataPoints or map changes
   // Solved Markers useEffect – single unified logic
+  // ────────────────────────────────────────────────────────────────
+  //  SINGLE unified effect for rendering markers + fitting bounds
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!map) return;
 
-    // 1. Clear all previous markers
-    markersRef.current.forEach((marker) => (marker.map = null));
+    // 1. Clear everything first
+    markersRef.current.forEach((marker) => {
+      marker.map = null;
+    });
     markersRef.current = [];
 
-    // 2. Choose which dataset to display
+    // 2. Decide which points to show (MST result takes priority)
     const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
 
     if (pointsToShow.length === 0) return;
@@ -392,28 +397,35 @@ export default function DemoPage() {
     const bounds = new google.maps.LatLngBounds();
     let hasValidPoints = false;
 
-    // 3. Create markers + extend bounds
+    // 3. Create markers
     pointsToShow.forEach((point) => {
-      if (isNaN(point.lat) || isNaN(point.lng)) {
-        return;
-      }
+      if (isNaN(point.lat) || isNaN(point.lng)) return;
 
       hasValidPoints = true;
 
-      const marker = createMarker(point, map);
-      markersRef.current.push(marker);
+      const marker = createMarker(
+        {
+          lat: point.lat,
+          lng: point.lng,
+          name: point.name,
+          type: 'type' in point ? point.type : undefined,
+        },
+        map
+      );
 
+      markersRef.current.push(marker);
       bounds.extend({ lat: point.lat, lng: point.lng });
     });
 
-    // 4. Fit map bounds if we have valid points
+    // 4. Fit bounds only if we actually added something
     if (hasValidPoints && !bounds.isEmpty()) {
-      // Slight delay helps when map is still initializing / resizing
+      // Small delay helps when map is still settling / resizing
       setTimeout(() => {
         map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 120);
+      }, 150);
     }
-  }, [map, dataPoints, mstNodes]); // dependencies are correct
+  }, [map, dataPoints, mstNodes]);
+
   // Draw lines on map
   useEffect(() => {
     if (!map) return;
@@ -440,39 +452,6 @@ export default function DemoPage() {
       polylinesRef.current.push(polyline);
     });
   }, [map, mstEdges]);
-
-  // fit map to uploaded points immediately (before optimization)
-  useEffect(() => {
-    if (!map) return;
-
-    // Clear previous markers
-    markersRef.current.forEach((m) => (m.map = null));
-    markersRef.current = [];
-
-    const bounds = new google.maps.LatLngBounds();
-    let hasValidPoints = false;
-
-    // Decide which list to render
-    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
-
-    pointsToShow.forEach((point) => {
-      if (isNaN(point.lat) || isNaN(point.lng)) return;
-      hasValidPoints = true;
-
-      const marker = createMarker(point, map);
-      markersRef.current.push(marker);
-
-      bounds.extend({ lat: point.lat, lng: point.lng });
-    });
-
-    // Fit bounds if we have valid points
-    if (hasValidPoints && !bounds.isEmpty()) {
-      // Small delay helps avoid race conditions with map init
-      setTimeout(() => {
-        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 150);
-    }
-  }, [map, dataPoints, mstNodes]);
 
   // Fetch saved runs when user is logged in
   useEffect(() => {
@@ -675,6 +654,7 @@ export default function DemoPage() {
     setCalcError(null);
     setError(null);
     setFileName(null);
+    setDataPoints([]);
 
     // Generate random points within a 100 square mile area
     // 100 square miles is roughly 10 miles x 10 miles
@@ -1466,6 +1446,9 @@ export default function DemoPage() {
                     onClick={async () => {
                       if (loading) return;
                       setLoading(true);
+                      setDataPoints([]); // ← immediate visual clear
+                      setMstNodes([]);
+                      setMstEdges([]);
                       setError(null); // clear previous errors
 
                       try {

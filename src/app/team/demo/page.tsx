@@ -19,6 +19,70 @@ import { useSession } from 'next-auth/react';
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
+function toLiteral(
+  pos: google.maps.marker.AdvancedMarkerElement['position']
+): google.maps.LatLngLiteral | null {
+  if (!pos) return null;
+
+  if (typeof pos.lat === 'function' && typeof pos.lng === 'function') {
+    // It's a LatLng / LatLngAltitude instance
+    return {
+      lat: pos.lat(),
+      lng: pos.lng(),
+    };
+  }
+
+  // Already a literal
+  return {
+    lat: pos.lat as number,
+    lng: pos.lng as number,
+  };
+}
+
+const haversineDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) => {
+  const R = 6371e3; // Radius of the Earth in kilometers
+
+  // Function to convert degrees to radians
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI / 180);
+  };
+
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2); // The Haversine formula part 'a'
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Angular distance 'c'
+
+  const distance = R * c; // Distance 'd' = R * c
+  return distance;
+};
+
+interface MiniGridRun {
+  id: string;
+  name?: string;
+  createdAt: string; // or Date if you convert it
+  fileName?: string | null;
+  dataPoints: LocationPoint[];
+  mstNodes: MSTNode[];
+  mstEdges: MSTEdge[];
+  costBreakdown?: CostBreakdown | null;
+  poleCost: number;
+  lowVoltageCost: number;
+  highVoltageCost: number;
+  // add any other fields you actually use from the API
+}
+
 const formatMeters = (m: number) =>
   m.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const formatUSD = (v: number) =>
@@ -27,8 +91,12 @@ const formatUSD = (v: number) =>
     maximumFractionDigits: 2,
   });
 
+const highVoltageColor = '#8B5CF6';
+const lowVoltageColor = '#3B82F6';
+
 interface LocationPoint {
   name: string;
+  type: 'source' | 'terminal' | 'pole';
   lat: number;
   lng: number;
 }
@@ -45,7 +113,7 @@ interface MSTNode {
   lat: number;
   lng: number;
   name: string;
-  type: 'source' | 'building' | 'pole';
+  type: 'source' | 'terminal' | 'pole';
 }
 
 interface CostBreakdown {
@@ -73,7 +141,8 @@ export default function DemoPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const markerDragRef = useRef<string>(null);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
   const [mstNodes, setMstNodes] = useState<MSTNode[]>([]);
@@ -81,18 +150,22 @@ export default function DemoPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const [poleCost, setPoleCost] = useState<number>(1000);
-  const [lowVoltageCost, setLowVoltageCost] = useState<number>(4);
-  const [highVoltageCost, setHighVoltageCost] = useState<number>(10);
+  const [poleCost, setPoleCost] = useState<number>(100);
+  const [lowVoltageCost, setLowVoltageCost] = useState<number>(10);
+  const [highVoltageCost, setHighVoltageCost] = useState<number>(20);
   const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
+
+  const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
+  const [loadingSaved, setLoadingSaved] = useState(false);
 
   const [costBreakdown, setCostBreakdown] = useState<CostBreakdown | null>(
     null
   );
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  const { data: session } = useSession();
 
   // Initialize map once Google Maps script loads
   const initMap = () => {
@@ -104,104 +177,228 @@ export default function DemoPage() {
       mapTypeId: 'satellite' as google.maps.MapTypeId,
       fullscreenControl: false,
       streetViewControl: false,
+      mapId: 'DEMO_MAP_ID', // Required for AdvancedMarkerElement
     });
 
     setMap(googleMap);
   };
 
+  // Helper to create a consistent marker for any point/node
+  const createMarker = (
+    point: {
+      lat: number;
+      lng: number;
+      name: string;
+      type?: 'source' | 'terminal' | 'pole';
+    },
+    map: google.maps.Map
+  ) => {
+    const type = point.type || 'terminal'; // raw uploaded points → treat as 'terminal'
+
+    let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
+    let labelColor = 'white';
+    let scaledSize = new google.maps.Size(36, 36);
+    let fontSize = '13px';
+
+    switch (type) {
+      case 'source':
+        iconUrl += 'green-dot.png';
+        labelColor = '#00ff00'; // bright green
+        scaledSize = new google.maps.Size(44, 44);
+        break;
+
+      case 'terminal':
+        iconUrl += 'blue-dot.png';
+        labelColor = 'white';
+        // keep default size
+        break;
+
+      case 'pole':
+        iconUrl += 'yellow-dot.png';
+        scaledSize = new google.maps.Size(28, 28);
+        fontSize = '11px';
+        labelColor = '#ffff99'; // light yellow for visibility
+        break;
+
+      default:
+        iconUrl += 'red-dot.png';
+    }
+
+    // Create custom content for AdvancedMarkerElement
+    const content = document.createElement('div');
+    content.style.display = 'flex';
+    content.style.flexDirection = 'column';
+    content.style.alignItems = 'center';
+    content.style.position = 'relative';
+
+    const iconImg = document.createElement('img');
+    iconImg.src = iconUrl;
+    iconImg.style.width = `${scaledSize.width}px`;
+    iconImg.style.height = `${scaledSize.height}px`;
+    content.appendChild(iconImg);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = point.name;
+    labelSpan.style.color = labelColor;
+    labelSpan.style.fontSize = fontSize;
+    labelSpan.style.fontWeight = 'bold';
+    labelSpan.style.textShadow = '0 0 2px black'; // Better visibility on satellite map
+    labelSpan.style.marginTop = '2px';
+    content.appendChild(labelSpan);
+
+    const marker = new google.maps.marker.AdvancedMarkerElement({
+      position: { lat: point.lat, lng: point.lng },
+      map,
+      content,
+      title: point.type ? `${point.name} (${point.type})` : point.name,
+      gmpDraggable: true,
+    });
+
+    marker.addListener('dragstart', () => {
+      const literal = toLiteral(marker.position);
+      if (literal) {
+        markerDragRef.current = `${literal.lat},${literal.lng}`;
+      }
+    });
+
+    // drag
+    marker.addListener('drag', () => {
+      const current = toLiteral(marker.position);
+      if (!current) return;
+
+      const curLat = current.lat; // now definitely number
+      const curLng = current.lng;
+
+      const prevStr = markerDragRef.current;
+      if (!prevStr) return;
+      const [prevLat, prevLng] = prevStr.split(',').map(Number);
+
+      const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
+
+      polylinesRef.current.forEach((line) => {
+        const path = line.getPath();
+        if (path.getLength() !== 2) return;
+
+        const start = path.getAt(0);
+        const end = path.getAt(1);
+
+        const startLat = start.lat(); // classic LatLng → method
+        const startLng = start.lng();
+        const endLat = end.lat();
+        const endLng = end.lng();
+
+        let changed = false;
+        let prevDist = 0;
+
+        const lineType =
+          line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
+
+        if (
+          Math.abs(startLat - prevLat) < 1e-9 &&
+          Math.abs(startLng - prevLng) < 1e-9
+        ) {
+          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
+          line.setPath([
+            { lat: curLat, lng: curLng }, // now safe: numbers
+            { lat: endLat, lng: endLng },
+          ]);
+          changed = true;
+        } else if (
+          Math.abs(endLat - prevLat) < 1e-9 &&
+          Math.abs(endLng - prevLng) < 1e-9
+        ) {
+          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
+          line.setPath([
+            { lat: startLat, lng: startLng },
+            { lat: curLat, lng: curLng },
+          ]);
+          changed = true;
+        }
+
+        if (changed) {
+          const newDist = haversineDistance(
+            line.getPath().getAt(0).lat(),
+            line.getPath().getAt(0).lng(),
+            line.getPath().getAt(1).lat(),
+            line.getPath().getAt(1).lng()
+          );
+          if (lineType === 'low') {
+            diff.lowVoltageMeters += newDist - prevDist;
+          } else {
+            diff.highVoltageMeters += newDist - prevDist;
+          }
+        }
+      });
+
+      setCostBreakdown((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
+          highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
+          totalMeters:
+            prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
+          wireCost:
+            prev.wireCost +
+            diff.lowVoltageMeters * lowVoltageCost +
+            diff.highVoltageMeters * highVoltageCost,
+          grandTotal:
+            prev.grandTotal +
+            diff.lowVoltageMeters * lowVoltageCost +
+            diff.highVoltageMeters * highVoltageCost,
+        };
+      });
+
+      markerDragRef.current = `${curLat},${curLng}`;
+    });
+
+    // dragend remains the same
+    marker.addListener('dragend', () => {
+      markerDragRef.current = null;
+    });
+
+    return marker;
+  };
+
   // Add markers and fit bounds whenever dataPoints or map changes
-  // Effect 1: Draw / update markers (runs when dataPoints or map changes)
+  // Optimized Markers useEffect – single unified logic
   useEffect(() => {
     if (!map) return;
 
-    // Clear old markers
-    markersRef.current.forEach((m) => m.setMap(null));
+    // 1. Clear all previous markers
+    markersRef.current.forEach((marker) => (marker.map = null));
     markersRef.current = [];
+
+    // 2. Choose which dataset to display
+    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
+
+    if (pointsToShow.length === 0) return;
 
     const bounds = new google.maps.LatLngBounds();
     let hasValidPoints = false;
 
-    // Case 1: Show raw uploaded points if no MST result yet
-    if (mstNodes.length === 0 && dataPoints.length > 0) {
-      dataPoints.forEach((point) => {
-        if (isNaN(point.lat) || isNaN(point.lng)) return;
-        hasValidPoints = true;
+    // 3. Create markers + extend bounds
+    pointsToShow.forEach((point) => {
+      if (isNaN(point.lat) || isNaN(point.lng)) {
+        return;
+      }
 
-        const marker = new google.maps.Marker({
-          position: { lat: point.lat, lng: point.lng },
-          map,
-          label: {
-            text: point.name,
-            color: 'white',
-            fontSize: '13px',
-            fontWeight: 'bold',
-          },
-          icon: {
-            url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
-            scaledSize: new google.maps.Size(36, 36),
-          },
-          title: point.name,
-        });
-
-        markersRef.current.push(marker);
-        bounds.extend({ lat: point.lat, lng: point.lng });
-      });
-    }
-
-    // Case 2: Show optimized nodes (source + buildings + poles)
-    else if (mstNodes.length > 0) {
       hasValidPoints = true;
-      mstNodes.forEach((node) => {
-        if (isNaN(node.lat) || isNaN(node.lng)) return;
 
-        let iconUrl = 'http://maps.google.com/mapfiles/ms/icons/';
-        let labelColor = 'white';
-        let scaledSize = new google.maps.Size(36, 36);
+      const marker = createMarker(point, map);
+      markersRef.current.push(marker);
 
-        switch (node.type) {
-          case 'source':
-            iconUrl += 'green-dot.png';
-            labelColor = '#00ff00';
-            scaledSize = new google.maps.Size(44, 44);
-            break;
-          case 'building':
-            iconUrl += 'blue-dot.png';
-            break;
-          case 'pole':
-            iconUrl += 'yellow-dot.png';
-            scaledSize = new google.maps.Size(28, 28);
-            break;
-          default:
-            iconUrl += 'red-dot.png';
-        }
+      bounds.extend({ lat: point.lat, lng: point.lng });
+    });
 
-        const marker = new google.maps.Marker({
-          position: { lat: node.lat, lng: node.lng },
-          map,
-          label: {
-            text: node.name,
-            color: labelColor,
-            fontSize: node.type === 'pole' ? '11px' : '13px',
-            fontWeight: 'bold',
-          },
-          icon: { url: iconUrl, scaledSize },
-          title: `${node.name} (${node.type})`,
-        });
-
-        markersRef.current.push(marker);
-        bounds.extend({ lat: node.lat, lng: node.lng });
-      });
-    }
-
-    // Always try to fit bounds if we have something to show
+    // 4. Fit map bounds if we have valid points
     if (hasValidPoints && !bounds.isEmpty()) {
-      // Add a small delay to ensure map is ready for fitBounds
+      // Slight delay helps when map is still initializing / resizing
       setTimeout(() => {
         map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 100);
+      }, 120);
     }
-  }, [map, dataPoints, mstNodes]);
-
+  }, [map, dataPoints, mstNodes]); // dependencies are correct
   // Draw lines on map
   useEffect(() => {
     if (!map) return;
@@ -212,7 +409,8 @@ export default function DemoPage() {
     mstEdges.forEach((edge) => {
       if (!edge?.start || !edge?.end) return;
 
-      const color = edge.voltage === 'high' ? '#8B5CF6' : '#3B82F6'; // purple high, blue low
+      const color =
+        edge.voltage === 'high' ? highVoltageColor : lowVoltageColor;
       const weight = edge.voltage === 'high' ? 6 : 4;
 
       const polyline = new google.maps.Polyline({
@@ -230,20 +428,58 @@ export default function DemoPage() {
 
   // fit map to uploaded points immediately (before optimization)
   useEffect(() => {
-    if (!map || dataPoints.length === 0 || mstNodes.length > 0) return; // skip if MST already drawn
+    if (!map) return;
+
+    // Clear previous markers
+    markersRef.current.forEach((m) => (m.map = null));
+    markersRef.current = [];
 
     const bounds = new google.maps.LatLngBounds();
+    let hasValidPoints = false;
 
-    dataPoints.forEach((point) => {
-      if (!isNaN(point.lat) && !isNaN(point.lng)) {
-        bounds.extend({ lat: point.lat, lng: point.lng });
-      }
+    // Decide which list to render
+    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
+
+    pointsToShow.forEach((point) => {
+      if (isNaN(point.lat) || isNaN(point.lng)) return;
+      hasValidPoints = true;
+
+      const marker = createMarker(point, map);
+      markersRef.current.push(marker);
+
+      bounds.extend({ lat: point.lat, lng: point.lng });
     });
 
-    if (!bounds.isEmpty()) {
-      map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+    // Fit bounds if we have valid points
+    if (hasValidPoints && !bounds.isEmpty()) {
+      // Small delay helps avoid race conditions with map init
+      setTimeout(() => {
+        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+      }, 150);
     }
-  }, [map, dataPoints]); // only when raw points change
+  }, [map, dataPoints, mstNodes]);
+
+  // Fetch saved runs when user is logged in
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const fetchSaved = async () => {
+      setLoadingSaved(true);
+      try {
+        const res = await fetch('/api/minigrids');
+        if (res.ok) {
+          const data = await res.json();
+          setSavedRuns(data);
+        }
+      } catch (err) {
+        console.error('Failed to load saved runs', err);
+      } finally {
+        setLoadingSaved(false);
+      }
+    };
+
+    fetchSaved();
+  }, [session?.user?.id]);
 
   const parseKml = (text: string): LocationPoint[] => {
     const parser = new DOMParser();
@@ -289,44 +525,6 @@ export default function DemoPage() {
     if (!file) return;
 
     processFile(file);
-  };
-
-  // parse a KML file and extract point placemarks
-  const parseKml = (text: string): LocationPoint[] => {
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, 'application/xml');
-    const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
-    const points: LocationPoint[] = [];
-
-    placemarks.forEach((placemark) => {
-      const nameEl = placemark.getElementsByTagName('name')[0];
-      const baseName = nameEl?.textContent?.trim() || 'Unnamed';
-
-      // look for <Point> coordinates first
-      const coordsEls = Array.from(
-        placemark.getElementsByTagName('coordinates')
-      );
-
-      coordsEls.forEach((coordsEl, coordIdx) => {
-        const coordsText = coordsEl.textContent?.trim() || '';
-        if (!coordsText) return;
-
-        // coordinates may be "lon,lat[,alt]" or multiple pairs separated by spaces or newlines
-        const firstPair = coordsText.split(/\s+/)[0];
-        const parts = firstPair.split(',');
-        if (parts.length < 2) return;
-        const lon = parseFloat(parts[0]);
-        const lat = parseFloat(parts[1]);
-        if (isNaN(lat) || isNaN(lon)) return;
-
-        const name =
-          coordsEls.length > 1 ? `${baseName}_${coordIdx + 1}` : baseName;
-
-        points.push({ name, lat, lng: lon });
-      });
-    });
-
-    return points;
   };
 
   const processFile = (file: File) => {
@@ -432,12 +630,13 @@ export default function DemoPage() {
 
     // Generate random points within a 100 square mile area
     // 100 square miles is roughly 10 miles x 10 miles
-    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees
+    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees,
+    // 0.001 degrees ≈ 0.07 miles - more on the scale of the mini grids
     // Longitude degrees vary with latitude, but we'll use a center point
     const centerLat = 33.77728650419152; // Georgia Tech campus, Atlanta, GA
     const centerLng = -84.39617097270636;
-    const latRange = 0.145; // ~10 miles north/south
-    const lngRange = 0.145 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
+    const latRange = 0.001; // small
+    const lngRange = 0.001 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
 
     const points: LocationPoint[] = [];
     const maxAttempts = count * 10; // Prevent infinite loops
@@ -445,6 +644,7 @@ export default function DemoPage() {
 
     while (points.length < count && attempts < maxAttempts) {
       // Generate coordinates with high precision
+
       const latOffset = (Math.random() - 0.5) * latRange * 2;
       const lngOffset = (Math.random() - 0.5) * lngRange * 2;
 
@@ -460,8 +660,15 @@ export default function DemoPage() {
       );
 
       if (!isDuplicate) {
+        const type = points.length === 0 ? 'source' : 'terminal';
+        const name =
+          points.length === 0
+            ? 'Source'
+            : `Destination ${String(points.length + 1).padStart(2, '0')}`;
+
         points.push({
-          name: `Location_${String(points.length + 1).padStart(2, '0')}`,
+          name: name,
+          type,
           lat,
           lng,
         });
@@ -522,25 +729,32 @@ export default function DemoPage() {
     setCalcError(null);
 
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/optimize';
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      'http://localhost:8000/optimize/v1';
 
     const startTime = performance.now();
+    const debug = true;
 
     try {
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          points: dataPoints.map((p) => ({
-            lat: p.lat,
-            lng: p.lng,
-            name: p.name ?? null,
-          })),
+          points: markersRef.current.map((marker) => {
+            const pos = marker.position as google.maps.LatLngLiteral; // or just as { lat: number; lng: number }
+
+            return {
+              lat: pos.lat,
+              lng: pos.lng,
+              name: marker.title ?? null,
+            };
+          }),
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,
             highVoltageCostPerMeter: highVoltageCost || 0,
           },
+          debug: false,
         }),
       });
 
@@ -562,7 +776,9 @@ export default function DemoPage() {
 
       const data = await res.json();
 
-      // console.log('Optimization result:', data);
+      if (debug) {
+        console.log('Optimization result:', data);
+      }
 
       if (data.error) throw new Error(data.error);
 

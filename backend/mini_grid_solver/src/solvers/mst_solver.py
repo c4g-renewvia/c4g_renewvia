@@ -1,5 +1,5 @@
 # src/solvers/simple_mst_solver.py
-from typing import List
+from typing import List, Literal
 
 import networkx as nx
 
@@ -37,7 +37,7 @@ class SimpleMSTSolver(BaseMiniGridSolver):
         # 2. Create nodes (only originals — no candidates)
         nodes: List[Node] = []
         for i in range(n):
-            node_type = "source" if i == source_idx else "terminal"
+            node_type: Literal["source", "terminal", "pole"] = "source" if i == source_idx else "terminal"
             name = names[i] if i < len(names) else f"Point {i + 1}"
             nodes.append(Node(
                 index=i,

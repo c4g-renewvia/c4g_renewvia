@@ -165,6 +165,10 @@ export default function DemoPage() {
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  const [solvers, setSolvers] = useState<string[]>([]);
+  const [selectedSolver, setSelectedSolver] =
+    useState<string>('SimpleMSTSolver');
+
   const { data: session } = useSession();
 
   // Initialize map once Google Maps script loads
@@ -360,8 +364,19 @@ export default function DemoPage() {
     return marker;
   };
 
+  const getSolversURL =
+    process.env.NEXT_PUBLIC_GET_SOLVERS || 'http://localhost:8000/solvers';
+
+  useEffect(() => {
+    fetch(getSolversURL)
+      .then((res) => res.json())
+      .then((data) => setSolvers(data.solvers));
+  }, []);
+
+  console.log('Solvers:', solvers);
+
   // Add markers and fit bounds whenever dataPoints or map changes
-  // Optimized Markers useEffect – single unified logic
+  // Solved Markers useEffect – single unified logic
   useEffect(() => {
     if (!map) return;
 
@@ -484,13 +499,42 @@ export default function DemoPage() {
   const parseKml = (text: string): LocationPoint[] => {
     const parser = new DOMParser();
     const xml = parser.parseFromString(text, 'application/xml');
+
+    // Optional: check for parse errors
+    if (xml.getElementsByTagName('parsererror').length > 0) {
+      console.error('KML parsing error');
+      return [];
+    }
+
     const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
     const points: LocationPoint[] = [];
 
     placemarks.forEach((placemark) => {
+      // ── Name ───────────────────────────────────────────────
       const nameEl = placemark.getElementsByTagName('name')[0];
       const baseName = nameEl?.textContent?.trim() || 'Unnamed';
 
+      // ── Type from description ──────────────────────────────
+      const descEl = placemark.getElementsByTagName('description')[0];
+      let pointType: 'source' | 'terminal' = 'terminal'; // default
+
+      if (descEl) {
+        const descText = descEl.textContent?.trim() || '';
+
+        // Look for patterns like: "Type: source", "type:source", "source", etc.
+        const typeMatch =
+          descText.match(/type\s*[:=]\s*(\w+)/i) ||
+          descText.match(/\b(source|terminal)\b/i);
+
+        if (typeMatch) {
+          const candidate = typeMatch[1]?.toLowerCase();
+          if (candidate === 'source' || candidate === 'terminal') {
+            pointType = candidate as 'source' | 'terminal';
+          }
+        }
+      }
+
+      // ── Coordinates ────────────────────────────────────────
       const coordsEls = Array.from(
         placemark.getElementsByTagName('coordinates')
       );
@@ -499,6 +543,7 @@ export default function DemoPage() {
         const coordsText = coordsEl.textContent?.trim() || '';
         if (!coordsText) return;
 
+        // Take first coordinate pair (ignore altitude if present)
         const firstPair = coordsText.split(/\s+/)[0];
         const parts = firstPair.split(',');
         if (parts.length < 2) return;
@@ -510,9 +555,12 @@ export default function DemoPage() {
         const name =
           coordsEls.length > 1 ? `${baseName}_${coordIdx + 1}` : baseName;
 
-        // KML usually doesn't have type → default to 'terminal'
-        // (you can later improve this if your KML includes <ExtendedData> or description)
-        points.push({ name, type: 'terminal', lat, lng: lon });
+        points.push({
+          name,
+          type: pointType,
+          lat,
+          lng: lon, // note: you're already swapping to {lat, lng}
+        });
       });
     });
 
@@ -664,7 +712,7 @@ export default function DemoPage() {
         const name =
           points.length === 0
             ? 'Source'
-            : `Destination ${String(points.length + 1).padStart(2, '0')}`;
+            : `Terminal ${String(points.length + 1).padStart(2, '0')}`;
 
         points.push({
           name: name,
@@ -717,7 +765,7 @@ export default function DemoPage() {
     }
   };
 
-  const handleRunOptimization = async () => {
+  const handleRunSolver = async () => {
     if (dataPoints.length < 2) {
       alert('Need at least 2 points to run optimization.');
       return;
@@ -729,8 +777,11 @@ export default function DemoPage() {
     setCalcError(null);
 
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL ||
-      'http://localhost:8000/optimize/v1';
+      process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/solve';
+
+    console.log(process.env.NEXT_PUBLIC_BACKEND_URL);
+
+    console.log('Sending request to:', backendUrl);
 
     const startTime = performance.now();
     const debug = true;
@@ -740,6 +791,8 @@ export default function DemoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          solver: selectedSolver,
+          params: {},
           points: markersRef.current.map((marker) => {
             const pos = marker.position as google.maps.LatLngLiteral; // or just as { lat: number; lng: number }
 
@@ -760,9 +813,7 @@ export default function DemoPage() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(
-          errData.detail || errData.error || 'Optimization failed'
-        );
+        throw new Error(errData.detail || errData.error || 'Solve failed');
       }
 
       const endTime = performance.now();
@@ -770,14 +821,14 @@ export default function DemoPage() {
       const durationSec = (durationMs / 1000).toFixed(2);
 
       console.log(
-        `%c[API Request] Optimization took ${durationMs.toFixed(0)} ms (${durationSec} sec)`,
+        `%c[API Request] Solve took ${durationMs.toFixed(0)} ms (${durationSec} sec)`,
         'background: #1e293b; color: #60a5fa; padding: 4px 8px; border-radius: 4px;'
       );
 
       const data = await res.json();
 
       if (debug) {
-        console.log('Optimization result:', data);
+        console.log('Solver result:', data);
       }
 
       if (data.error) throw new Error(data.error);
@@ -837,7 +888,7 @@ export default function DemoPage() {
       const message =
         err instanceof Error ? err.message : 'Failed to run optimization';
       setCalcError(message);
-      console.error('Optimization error:', err);
+      console.error('Solver error:', err);
     } finally {
       setComputingMst(false);
     }
@@ -983,7 +1034,7 @@ export default function DemoPage() {
     const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Mini-Grid • ${fileName || 'Optimized Network'}</name>
+    <name>Mini-Grid • ${fileName || 'Solved Network'}</name>
     <open>1</open>
 
     ${kmlStyles}
@@ -1245,10 +1296,10 @@ export default function DemoPage() {
                     <Dialog>
                       <DialogTrigger asChild>
                         <button className='text-xs text-emerald-400 underline hover:text-emerald-300'>
-                          view full
+                          Example
                         </button>
                       </DialogTrigger>
-                      <DialogContent className='sm:max-w-md'>
+                      <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
                         <DialogHeader>
                           <DialogTitle>CSV Sample Format</DialogTitle>
                         </DialogHeader>
@@ -1282,10 +1333,10 @@ export default function DemoPage() {
                     <Dialog>
                       <DialogTrigger asChild>
                         <button className='text-xs text-emerald-400 underline hover:text-emerald-300'>
-                          view full
+                          Example
                         </button>
                       </DialogTrigger>
-                      <DialogContent className='sm:max-w-md'>
+                      <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
                         {/* your existing KML content here – same as before */}
                         <DialogHeader>
                           <DialogTitle>KML Sample Format</DialogTitle>
@@ -1297,12 +1348,14 @@ export default function DemoPage() {
   <Document>
     <Placemark>
       <name>Georgia Tech</name>
+      <description>Type: source</description>
       <Point>
         <coordinates>-84.39617097,33.77728650,0</coordinates>
       </Point>
     </Placemark>
     <Placemark>
       <name>Student Center</name>
+      <description>Type: terminal</description>
       <Point>
         <coordinates>-84.39750000,33.77680000,0</coordinates>
       </Point>
@@ -1559,10 +1612,10 @@ export default function DemoPage() {
           </div>
         </section>
 
-        {/* ── 2. Costs & Optimization ──────────────────────────────────────── */}
+        {/* ── 2. Costs & Solver ──────────────────────────────────────── */}
         <section className='mb-10 md:mb-12'>
           <h2 className='mb-5 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
-            2. Costs & Optimization
+            2. Costs & Solver
           </h2>
 
           <div className='grid gap-6 md:grid-cols-2 lg:gap-8'>
@@ -1630,12 +1683,66 @@ export default function DemoPage() {
 
             {/* Run button area */}
             <div className='flex flex-col items-center justify-center rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-6 text-center backdrop-blur-sm'>
+              {/* Label + Select wrapper */}
+              <div className='w-full'>
+                <label
+                  htmlFor='solver-select'
+                  className='mb-2 block text-sm font-medium text-zinc-300'
+                >
+                  Select Solver
+                </label>
+
+                <div className='relative'>
+                  <select
+                    id='solver-select'
+                    name='solver'
+                    value={selectedSolver} // ← assume you have state for this
+                    onChange={(e) => setSelectedSolver(e.target.value)}
+                    className={`/* extra right padding for arrow */ w-full cursor-pointer appearance-none rounded-lg border border-zinc-700/70 bg-zinc-800/60 px-4 py-3 pr-10 text-base font-medium text-zinc-100 shadow-inner shadow-black/30 transition-all duration-200 hover:border-zinc-600/80 hover:bg-zinc-800/80 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/50 focus:outline-none`}
+                  >
+                    <option value='' disabled className='text-zinc-500'>
+                      Choose a solver...
+                    </option>
+                    {solvers.map((s) => (
+                      <option
+                        key={s}
+                        value={s}
+                        className='bg-zinc-900 text-zinc-100'
+                      >
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Custom chevron arrow */}
+                  <div className='pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4'>
+                    <svg
+                      className='h-5 w-5 text-zinc-400'
+                      fill='none'
+                      stroke='currentColor'
+                      viewBox='0 0 24 24'
+                    >
+                      <path
+                        strokeLinecap='round'
+                        strokeLinejoin='round'
+                        strokeWidth={2}
+                        d='M19 9l-7 7-7-7'
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <br />
+
               <button
-                onClick={handleRunOptimization}
-                disabled={computingMst || dataPoints.length < 2}
-                className='w-full max-w-md rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50'
+                onClick={handleRunSolver}
+                disabled={
+                  computingMst || dataPoints.length < 2 || !selectedSolver
+                } // ← added !selectedSolver check
+                className={`w-full max-w-md rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all duration-300 hover:scale-[1.02] hover:from-purple-500 hover:to-indigo-500 hover:shadow-purple-700/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50`}
               >
-                {computingMst ? 'Optimizing…' : 'Run Optimization'}
+                {computingMst ? 'Solving…' : 'Run Solver'}
               </button>
 
               <p className='mt-4 text-xs text-zinc-500'>

@@ -1,6 +1,12 @@
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from v1.mst import compute_mst, OptimizationRequest
+
+from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY  # or wherever
+from mini_grid_solver.src.utils.models import OptimizationRequest
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Renewvia MST Optimizer")
 
@@ -17,13 +23,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/optimize/v1")
+
+@app.post("/solve")
 async def optimize(request: OptimizationRequest):
     if len(request.points) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 points")
 
     try:
-        result = compute_mst(request)
+        solver_class = SOLVER_REGISTRY[request.solver]
+
+        logger.info(solver_class)
+
+        result = solver_class(request).solve()
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/solvers")
+async def get_solvers() -> dict:
+    # get solvers programatically from import
+
+    if len(SOLVER_REGISTRY) == 0 or SOLVER_REGISTRY is None:
+        raise HTTPException(status_code=500, detail="No solvers available")
+
+    return {"solvers": list(SOLVER_REGISTRY.keys())}

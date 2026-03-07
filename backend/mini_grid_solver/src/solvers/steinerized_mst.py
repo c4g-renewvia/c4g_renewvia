@@ -150,7 +150,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
                     )
                 else:
                     # Intermediate pole
-                    pole_name = f"Intermediate Pole {len(extra_pole_indices) + 1}"
+                    pole_name = f"Pole {len(extra_pole_indices) + 1}"
                     node_idx = add_node(lat, lng, pole_name, "pole")
                     extra_pole_indices.append(node_idx)
 

@@ -5,7 +5,7 @@ from typing import List, Tuple, Dict, Any, Optional, Literal
 
 import numpy as np
 
-from .mini_grid_solver import BaseMiniGridSolver
+from .base_mini_grid_solver import BaseMiniGridSolver
 from .registry import register_solver
 from ..utils.models import SolverRequest, SolverResult, OutputEdge, Node
 

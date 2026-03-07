@@ -8,7 +8,7 @@ from scipy.spatial import Voronoi, Delaunay
 from shapely.geometry import Point
 from shapely.wkt import loads
 
-from .mini_grid_solver import BaseMiniGridSolver
+from .base_mini_grid_solver import BaseMiniGridSolver
 from ..utils.models import *
 
 # For Voronoi candidates:

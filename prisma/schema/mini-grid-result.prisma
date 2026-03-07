@@ -8,8 +8,8 @@ model MiniGridRun {
 
   // Core data (JSON serialized)
   dataPoints    Json? // original uploaded points
-  mstNodes      Json?
-  mstEdges      Json?
+  miniGridNodes      Json?
+  miniGridEdges      Json?
   costBreakdown Json?
 
   poleCost        Float?

@@ -74,8 +74,8 @@ interface MiniGridRun {
   createdAt: string; // or Date if you convert it
   fileName?: string | null;
   dataPoints: LocationPoint[];
-  mstNodes: MSTNode[];
-  mstEdges: MSTEdge[];
+  miniGridNodes: MiniGridNode[];
+  miniGridEdges: MiniGridEdge[];
   costBreakdown?: CostBreakdown | null;
   poleCost: number;
   lowVoltageCost: number;
@@ -101,14 +101,14 @@ interface LocationPoint {
   lng: number;
 }
 
-interface MSTEdge {
+interface MiniGridEdge {
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
   lengthMeters: number;
   voltage: 'low' | 'high';
 }
 
-interface MSTNode {
+interface MiniGridNode {
   index: number;
   lat: number;
   lng: number;
@@ -144,8 +144,8 @@ export default function DemoPage() {
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const markerDragRef = useRef<string>(null);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
-  const [mstEdges, setMstEdges] = useState<MSTEdge[]>([]);
-  const [mstNodes, setMstNodes] = useState<MSTNode[]>([]);
+  const [miniGridEdges, setMstEdges] = useState<MiniGridEdge[]>([]);
+  const [miniGridNodes, setMstNodes] = useState<MiniGridNode[]>([]);
   const [computingMst, setComputingMst] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -395,8 +395,8 @@ export default function DemoPage() {
     });
     markersRef.current = [];
 
-    // 2. Decide which points to show (MST result takes priority)
-    const pointsToShow = mstNodes.length > 0 ? mstNodes : dataPoints;
+    // 2. Decide which points to show (Solver result takes priority)
+    const pointsToShow = miniGridNodes.length > 0 ? miniGridNodes : dataPoints;
 
     if (pointsToShow.length === 0) return;
 
@@ -430,7 +430,7 @@ export default function DemoPage() {
         map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
       }, 150);
     }
-  }, [map, dataPoints, mstNodes]);
+  }, [map, dataPoints, miniGridNodes]);
 
   // Draw lines on map
   useEffect(() => {
@@ -439,7 +439,7 @@ export default function DemoPage() {
     polylinesRef.current.forEach((line) => line.setMap(null));
     polylinesRef.current = [];
 
-    mstEdges.forEach((edge) => {
+    miniGridEdges.forEach((edge) => {
       if (!edge?.start || !edge?.end) return;
 
       const color =
@@ -457,7 +457,7 @@ export default function DemoPage() {
 
       polylinesRef.current.push(polyline);
     });
-  }, [map, mstEdges]);
+  }, [map, miniGridEdges]);
 
   // Fetch saved runs when user is logged in
   useEffect(() => {
@@ -872,7 +872,7 @@ export default function DemoPage() {
 
       // Update edges (now includes lengthMeters & voltage)
       setMstEdges(
-        edges.map((e: MSTEdge) => ({
+        edges.map((e: MiniGridEdge) => ({
           start: e.start,
           end: e.end,
           lengthMeters: e.lengthMeters ?? 0,
@@ -922,7 +922,7 @@ export default function DemoPage() {
   };
 
   const downloadKml = () => {
-    if (mstNodes.length === 0 || mstEdges.length === 0) return;
+    if (miniGridNodes.length === 0 || miniGridEdges.length === 0) return;
 
     const escapeXml = (str: string) =>
       str
@@ -968,7 +968,7 @@ export default function DemoPage() {
 
     // Nodes
     let nodesKml = '';
-    mstNodes.forEach((node) => {
+    miniGridNodes.forEach((node) => {
       const styleId =
         node.type === 'source'
           ? 'source'
@@ -998,7 +998,7 @@ export default function DemoPage() {
 
     // Edges
     let linesKml = '';
-    mstEdges.forEach((edge, i) => {
+    miniGridEdges.forEach((edge, i) => {
       const styleId = edge.voltage === 'high' ? 'highVoltage' : 'lowVoltage';
       const lengthM = Math.round(edge.lengthMeters);
       const costPerM =
@@ -1033,7 +1033,7 @@ export default function DemoPage() {
       • Low: ${formatMeters(costBreakdown.lowVoltageMeters)} m → ${formatCost(costBreakdown.lowWireCost)}<br/>
       • High: ${formatMeters(costBreakdown.highVoltageMeters)} m → ${formatCost(costBreakdown.highWireCost)}<br/>
     <b>Poles:</b> ${costBreakdown.poleCount} × ${formatCost(costBreakdown.usedPoleCost ?? poleCost)}<br/>
-    <br/>Nodes: ${mstNodes.length} • Segments: ${mstEdges.length}
+    <br/>Nodes: ${miniGridNodes.length} • Segments: ${miniGridEdges.length}
   `
       : 'No cost data available';
 
@@ -1099,9 +1099,9 @@ export default function DemoPage() {
 
     // Reset and load core data
     setDataPoints(run.dataPoints || []);
-    setMstNodes(run.mstNodes || []);
+    setMstNodes(run.miniGridNodes || []);
     setMstEdges(
-      (run.mstEdges || []).map((e: MSTEdge) => ({
+      (run.miniGridEdges || []).map((e: MiniGridEdge) => ({
         start: { lat: Number(e.start?.lat), lng: Number(e.start?.lng) },
         end: { lat: Number(e.end?.lat), lng: Number(e.end?.lng) },
         lengthMeters: Number(e.lengthMeters) || 0,
@@ -1121,9 +1121,9 @@ export default function DemoPage() {
 
     // Optional: recenter map on loaded nodes
     setTimeout(() => {
-      if (map && run.mstNodes?.length > 0) {
+      if (map && run.miniGridNodes?.length > 0) {
         const bounds = new google.maps.LatLngBounds();
-        run.mstNodes.forEach((p: MSTNode) =>
+        run.miniGridNodes.forEach((p: MiniGridNode) =>
           bounds.extend({ lat: Number(p.lat), lng: Number(p.lng) })
         );
         map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
@@ -1202,7 +1202,7 @@ export default function DemoPage() {
       return;
     }
 
-    if (mstNodes.length === 0) {
+    if (miniGridNodes.length === 0) {
       alert('No optimization results to save yet.');
       return;
     }
@@ -1224,8 +1224,8 @@ export default function DemoPage() {
       name,
       fileName: fileName || null,
       dataPoints,
-      mstNodes,
-      mstEdges,
+      miniGridNodes,
+      miniGridEdges,
       costBreakdown,
       poleCost,
       lowVoltageCost,
@@ -1602,7 +1602,7 @@ export default function DemoPage() {
                             </p>
                             <p className='mt-0.5 text-xs text-zinc-600'>
                               {new Date(run.createdAt).toLocaleString()} <br />
-                              {run.mstNodes?.length || '?'} nodes
+                              {run.miniGridNodes?.length || '?'} nodes
                             </p>
                           </div>
                         ))}
@@ -1867,14 +1867,14 @@ export default function DemoPage() {
             <details className='group'>
               <summary className='flex cursor-pointer items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 px-6 py-4 text-lg font-semibold transition hover:bg-zinc-800/70'>
                 <span>
-                  Coordinates ({mstNodes.length || dataPoints.length})
+                  Coordinates ({miniGridNodes.length || dataPoints.length})
                 </span>
                 <span className='text-xl transition-transform group-open:rotate-180'>
                   ▼
                 </span>
               </summary>
               <div className='mt-3 max-h-[50vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 font-mono text-sm text-zinc-300'>
-                {(mstNodes.length > 0 ? mstNodes : dataPoints).map(
+                {(miniGridNodes.length > 0 ? miniGridNodes : dataPoints).map(
                   (point, i) => (
                     <div key={i} className='mb-1.5'>
                       {i + 1}.{' '}
@@ -1891,7 +1891,7 @@ export default function DemoPage() {
         )}
 
         {/* Export area */}
-        {costBreakdown && mstNodes.length > 0 && (
+        {costBreakdown && miniGridNodes.length > 0 && (
           <section className='mb-12'>
             <div className='rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-center'>
               <h3 className='mb-5 text-xl font-semibold text-emerald-300'>
@@ -1901,7 +1901,9 @@ export default function DemoPage() {
                 {/* Download KML button */}
                 <button
                   onClick={downloadKml}
-                  disabled={mstNodes.length === 0 || mstEdges.length === 0}
+                  disabled={
+                    miniGridNodes.length === 0 || miniGridEdges.length === 0
+                  }
                   className='flex-1 rounded-lg bg-purple-600/90 px-8 py-3.5 text-base font-medium transition hover:bg-purple-700 disabled:opacity-50'
                 >
                   Download KML
@@ -1913,7 +1915,7 @@ export default function DemoPage() {
                   onSave={handleSaveToDatabase}
                   disabled={
                     computingMst ||
-                    mstNodes.length === 0 ||
+                    miniGridNodes.length === 0 ||
                     savedRuns.length >= 10
                   }
                 />

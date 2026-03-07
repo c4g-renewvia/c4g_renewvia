@@ -369,6 +369,7 @@ export default function DemoPage() {
     return marker;
   };
 
+  // GET SOLVERS
   const getSolversURL =
     process.env.NEXT_PUBLIC_GET_SOLVERS || 'http://localhost:8000/solvers';
 

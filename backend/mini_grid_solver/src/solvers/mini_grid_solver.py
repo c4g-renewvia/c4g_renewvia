@@ -165,7 +165,7 @@ class BaseMiniGridSolver(ABC):
         if self._coords is not None:
             return self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
-        self._coords, self._terminal_indices, self._source_idx, self._names, self._costs = BaseMiniGridSolver.parse_input(
+        self._coords, self._terminal_indices, self._source_idx, self._names, self._costs = self.parse_input(
             self.request)
 
         # You can add more validation / normalization here if desired
@@ -229,7 +229,7 @@ class BaseMiniGridSolver(ABC):
 
     def compute_distance_matrix(self, points: np.ndarray) -> np.ndarray:
         """Default haversine distance matrix — override if you want Euclidean, etc."""
-        return BaseMiniGridSolver.haversine_vec(points, points)
+        return self.haversine_vec(points, points)
 
     def get_all_points(self) -> np.ndarray:
         """Convenience: return (n_points, 2) array of all original lat/lon"""

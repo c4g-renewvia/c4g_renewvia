@@ -25,7 +25,7 @@ app.add_middleware(
 
 
 @app.post("/solve")
-async def optimize(request: SolverRequest):
+async def solve(request: SolverRequest):
     if len(request.points) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 points")
 

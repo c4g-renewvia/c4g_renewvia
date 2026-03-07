@@ -263,7 +263,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         verts = vor.vertices  # shape (n_vertices, 2)
 
         # Vectorized haversine distances from vertices to original points
-        dists = CandidateMSTSolver.haversine_vec(verts, coords)  # assume you have this function
+        dists = self.haversine_vec(verts, coords)  # assume you have this function
 
         nearest_dists = np.partition(dists, 2, axis=1)[:, :3]
         min_dists = nearest_dists[:, 0]
@@ -303,7 +303,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 continue
 
             # Compute distances to already kept points
-            dists_to_kept = CandidateMSTSolver.haversine_vec(np.array([pt]), kept_array)[0]
+            dists_to_kept = self.haversine_vec(np.array([pt]), kept_array)[0]
 
             if np.all(dists_to_kept >= MIN_CANDIDATE_SEPARATION):
                 kept.append(pt)
@@ -398,7 +398,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                     kept_array = np.array([pt])
                     continue
 
-                dists_to_kept = CandidateMSTSolver.haversine_vec(np.array([pt]), kept_array)[0]
+                dists_to_kept = self.haversine_vec(np.array([pt]), kept_array)[0]
                 if np.all(dists_to_kept >= MIN_CANDIDATE_SEPARATION):
                     kept.append(pt)
                     kept_array = np.vstack([kept_array, pt])

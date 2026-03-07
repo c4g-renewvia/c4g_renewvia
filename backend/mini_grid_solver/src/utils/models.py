@@ -12,8 +12,7 @@ class SolverRequest(BaseModel):
         costs: Dict with poleCost, lowVoltageCostPerMeter, highVoltageCostPerMeter.
         debug: Optional flag to enable debug output.
     """
-    solver: str = ("SimpleMSTSolver"
-                   "")
+    solver: str = "SimpleMSTSolver"
     params: Dict[str, Any] = {}
     points: List[Dict[str, Union[float, str, None]]]
     costs: Dict[str, float]

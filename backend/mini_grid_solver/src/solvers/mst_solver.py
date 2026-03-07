@@ -57,7 +57,8 @@ class SimpleMSTSolver(BaseMiniGridSolver):
         for i in range(n):
             for j in range(i + 1, n):
                 d = dist_matrix[i, j]
-                G.edges[i, j]["weight"] = d
+                weight = d * costs["low"]
+                G.edges[i, j]["weight"] = weight
                 G.edges[i, j]["length"] = d
 
         # 5. Compute MST (Kruskal or Prim — NetworkX uses Kruskal by default)
@@ -79,9 +80,10 @@ class SimpleMSTSolver(BaseMiniGridSolver):
                 if v not in visited:
                     # Direct edge u → v (away from source)
                     length = mst_undirected.edges[u, v]["length"]
+                    weight = mst_undirected.edges[u, v]["weight"]
                     mst_directed.add_edge(
                         u, v,
-                        weight=length,
+                        weight=weight,
                         length=length,
                         voltage="low"  # everything low for this simple version
                     )

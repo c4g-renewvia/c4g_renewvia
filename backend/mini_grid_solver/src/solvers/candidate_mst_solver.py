@@ -71,9 +71,9 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         """
 
-        # pole_cost = float(costs.get("poleCost", 1000.0))
-        # low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 4.0))
-        # high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 10.0))
+        pole_cost = float(costs.get("poleCost", 1000.0))
+        low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 4.0))
+        high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 10.0))
 
         DG = nx.DiGraph()
 
@@ -82,7 +82,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             for h in terminal_indices:
                 d = dist_matrix[p, h]
                 if 0.1 < d:
-                    w = d  # TODO: Adjust weight based on costs
+                    w = d * low_voltage_cost_per_meter
                     DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
         # Bidirectional pole ↔ pole (undirected spans)
@@ -90,7 +90,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             for j in range(i + 1, len(pole_indices)):
                 p1, p2 = pole_indices[i], pole_indices[j]
                 d = dist_matrix[p1, p2]
-                w = d + 100  # TODO: Adjust weight based on costs
+                w = (d * low_voltage_cost_per_meter) + pole_cost // 2
                 if 0.1 < d:
                     DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
                     DG.add_edge(p2, p1, weight=w, length=d, voltage="low")
@@ -99,7 +99,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         for p in pole_indices:
             d = dist_matrix[source_idx, p]
             if 0.1 < d:
-                w = d  # TODO: Adjust weight based on costs
+                w = (d * low_voltage_cost_per_meter) + pole_cost // 2
                 DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
 
         return DG
@@ -531,7 +531,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             costs=costs,
         )
 
-        arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18)
+        arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
 
         # 5. Prune & fragment
         mst = self.prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)

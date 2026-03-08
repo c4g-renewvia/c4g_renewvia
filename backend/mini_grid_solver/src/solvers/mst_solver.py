@@ -57,7 +57,7 @@ class SimpleMSTSolver(BaseMiniGridSolver):
         for i in range(n):
             for j in range(i + 1, n):
                 d = dist_matrix[i, j]
-                weight = d * costs["low"]
+                weight = d * costs["lowVoltageCostPerMeter"]
                 G.edges[i, j]["weight"] = weight
                 G.edges[i, j]["length"] = d
 

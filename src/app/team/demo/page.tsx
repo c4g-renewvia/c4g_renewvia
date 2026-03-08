@@ -144,9 +144,9 @@ export default function DemoPage() {
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const markerDragRef = useRef<string>(null);
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
-  const [miniGridEdges, setMstEdges] = useState<MiniGridEdge[]>([]);
-  const [miniGridNodes, setMstNodes] = useState<MiniGridNode[]>([]);
-  const [computingMst, setComputingMst] = useState(false);
+  const [miniGridEdges, setMiniGridEdges] = useState<MiniGridEdge[]>([]);
+  const [miniGridNodes, setMiniGridNodes] = useState<MiniGridNode[]>([]);
+  const [computingMiniGrid, setComputingMiniGrid] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -379,8 +379,6 @@ export default function DemoPage() {
       .then((data) => setSolvers(data.solvers));
   }, []);
 
-  console.log('Solvers:', solvers);
-
   // Add markers and fit bounds whenever dataPoints or map changes
   // Solved Markers useEffect – single unified logic
   // ────────────────────────────────────────────────────────────────
@@ -561,8 +559,8 @@ export default function DemoPage() {
   };
 
   const processFile = (file: File) => {
-    setMstEdges([]);
-    setMstNodes([]);
+    setMiniGridEdges([]);
+    setMiniGridNodes([]);
     setCostBreakdown(null);
     setCalcError(null);
     setError(null);
@@ -655,7 +653,7 @@ export default function DemoPage() {
 
   const generateTestData = (count: number) => {
     // Reset anything derived from the previous data
-    setMstEdges([]);
+    setMiniGridEdges([]);
     setCostBreakdown(null);
     setCalcError(null);
     setError(null);
@@ -757,8 +755,8 @@ export default function DemoPage() {
       return;
     }
 
-    setComputingMst(true);
-    setMstEdges([]);
+    setComputingMiniGrid(true);
+    setMiniGridEdges([]);
     setCostBreakdown(null); // ← clear previous breakdown
     setCalcError(null);
 
@@ -807,7 +805,7 @@ export default function DemoPage() {
 
       if (originalPoints.length < 2) {
         alert('No valid source/terminal points found to optimize.');
-        setComputingMst(false);
+        setComputingMiniGrid(false);
         return;
       }
 
@@ -868,10 +866,10 @@ export default function DemoPage() {
         usedCosts, // optional – for display/debug
       } = data;
 
-      setMstNodes(data.nodes || []);
+      setMiniGridNodes(data.nodes || []);
 
       // Update edges (now includes lengthMeters & voltage)
-      setMstEdges(
+      setMiniGridEdges(
         edges.map((e: MiniGridEdge) => ({
           start: e.start,
           end: e.end,
@@ -906,7 +904,7 @@ export default function DemoPage() {
       setCalcError(message);
       console.error('Solver error:', err);
     } finally {
-      setComputingMst(false);
+      setComputingMiniGrid(false);
     }
   };
 
@@ -1099,8 +1097,8 @@ export default function DemoPage() {
 
     // Reset and load core data
     setDataPoints(run.dataPoints || []);
-    setMstNodes(run.miniGridNodes || []);
-    setMstEdges(
+    setMiniGridNodes(run.miniGridNodes || []);
+    setMiniGridEdges(
       (run.miniGridEdges || []).map((e: MiniGridEdge) => ({
         start: { lat: Number(e.start?.lat), lng: Number(e.start?.lng) },
         end: { lat: Number(e.end?.lat), lng: Number(e.end?.lng) },
@@ -1483,8 +1481,8 @@ export default function DemoPage() {
                       if (loading) return;
                       setLoading(true);
                       setDataPoints([]); // ← immediate visual clear
-                      setMstNodes([]);
-                      setMstEdges([]);
+                      setMiniGridNodes([]);
+                      setMiniGridEdges([]);
                       setError(null); // clear previous errors
 
                       try {
@@ -1757,11 +1755,11 @@ export default function DemoPage() {
               <button
                 onClick={handleRunSolver}
                 disabled={
-                  computingMst || dataPoints.length < 2 || !selectedSolver
+                  computingMiniGrid || dataPoints.length < 2 || !selectedSolver
                 } // ← added !selectedSolver check
                 className={`w-full max-w-md rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all duration-300 hover:scale-[1.02] hover:from-purple-500 hover:to-indigo-500 hover:shadow-purple-700/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50`}
               >
-                {computingMst ? 'Solving…' : 'Run Solver'}
+                {computingMiniGrid ? 'Solving…' : 'Run Solver'}
               </button>
 
               <p className='mt-4 text-xs text-zinc-500'>
@@ -1914,7 +1912,7 @@ export default function DemoPage() {
                   isAuthenticated={!!session?.user}
                   onSave={handleSaveToDatabase}
                   disabled={
-                    computingMst ||
+                    computingMiniGrid ||
                     miniGridNodes.length === 0 ||
                     savedRuns.length >= 10
                   }

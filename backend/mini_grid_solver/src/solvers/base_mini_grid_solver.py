@@ -34,7 +34,7 @@ class BaseMiniGridSolver(ABC):
 
     # ─── Static Helper methods ───────────────────────────────────────────────
     @staticmethod
-    def get_bounding_box(coords):
+    def compute_bounding_box(coords):
         """
         Compute axis-aligned bounding box from array of [lat, lon] points.
 

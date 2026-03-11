@@ -115,6 +115,34 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return DG
 
+    def extract_used_nodes(self, best_pruned_mst, nodes):
+        """
+        Extracts and processes nodes that are used within the provided pruned minimum
+        spanning tree (MST). Marks the nodes as used, assigns them a name if they are
+        of type "pole" and lack a name, and returns the list of used nodes.
+
+        Args:
+            best_pruned_mst: The pruned minimum spanning tree used to determine which
+                nodes to mark and process.
+            nodes: A list of nodes, where each node has attributes such as `index`,
+                `used`, `type`, and `name`.
+
+        Returns:
+            list: A list of nodes that are used, with appropriate properties updated
+            based on the given MST and node attributes.
+        """
+        used_indices = set(best_pruned_mst.nodes)
+        pole_counter = 1
+        used_nodes = []
+        for node in nodes:
+            if node.index in used_indices:
+                node.used = True
+                if node.type == "pole" and not node.name:
+                    node.name = f"Pole {pole_counter}"
+                    pole_counter += 1
+                used_nodes.append(node)
+        return used_nodes
+
     def prune_dead_end_pole_branches(self, arbo: nx.DiGraph, pole_indices: list, terminal_indices) -> nx.DiGraph:
         """
         Prunes dead-end pole branches in a Directed Graph (DiGraph).

@@ -169,6 +169,13 @@ export default function DemoPage() {
   const [selectedSolver, setSelectedSolver] =
     useState<string>('SimpleMSTSolver');
 
+  const [manualPoint, setManualPoint] = useState({
+    name: '',
+    lat: '',
+    lng: '',
+    type: 'terminal' as 'source' | 'terminal',
+  });
+
   const { data: session } = useSession();
 
   // Initialize map once Google Maps script loads
@@ -185,6 +192,29 @@ export default function DemoPage() {
     });
 
     setMap(googleMap);
+  };
+
+  const handleAddManualPoint = (e: React.FormEvent) => {
+    e.preventDefault();
+    const lat = parseFloat(manualPoint.lat);
+    const lng = parseFloat(manualPoint.lng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      alert('Please enter valid latitude and longitude numbers.');
+      return;
+    }
+
+    const newPoint: LocationPoint = {
+      name: manualPoint.name || `Manual Point ${dataPoints.length + 1}`,
+      type: manualPoint.type,
+      lat: lat,
+      lng: lng,
+    };
+
+    setDataPoints((prev) => [...prev, newPoint]);
+
+    // Reset form
+    setManualPoint({ name: '', lat: '', lng: '', type: 'terminal' });
   };
 
   // Helper to create a consistent marker for any point/node
@@ -1543,6 +1573,92 @@ export default function DemoPage() {
                     {error}
                   </p>
                 )}
+              </div>
+
+              {/* Manual Input Card */}
+              <div className='mt-6 rounded-xl border border-zinc-800/70 bg-zinc-900/55 p-5 shadow-inner backdrop-blur-sm'>
+                <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
+                  Manually Add Location
+                </h3>
+                <form onSubmit={handleAddManualPoint} className='space-y-4'>
+                  <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                    <div>
+                      <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
+                        Name
+                      </label>
+                      <input
+                        type='text'
+                        placeholder='e.g. House A'
+                        value={manualPoint.name}
+                        onChange={(e) =>
+                          setManualPoint({
+                            ...manualPoint,
+                            name: e.target.value,
+                          })
+                        }
+                        className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500'
+                      />
+                    </div>
+                    <div>
+                      <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
+                        Latitude
+                      </label>
+                      <input
+                        type='text'
+                        placeholder='33.777...'
+                        value={manualPoint.lat}
+                        onChange={(e) =>
+                          setManualPoint({
+                            ...manualPoint,
+                            lat: e.target.value,
+                          })
+                        }
+                        className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500'
+                      />
+                    </div>
+                    <div>
+                      <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
+                        Longitude
+                      </label>
+                      <input
+                        type='text'
+                        placeholder='-84.396...'
+                        value={manualPoint.lng}
+                        onChange={(e) =>
+                          setManualPoint({
+                            ...manualPoint,
+                            lng: e.target.value,
+                          })
+                        }
+                        className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500'
+                      />
+                    </div>
+                    <div>
+                      <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
+                        Type
+                      </label>
+                      <select
+                        value={manualPoint.type}
+                        onChange={(e) =>
+                          setManualPoint({
+                            ...manualPoint,
+                            type: e.target.value as 'source' | 'terminal',
+                          })
+                        }
+                        className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500'
+                      >
+                        <option value='terminal'>Terminal</option>
+                        <option value='source'>Source</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    type='submit'
+                    className='w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700 active:scale-95'
+                  >
+                    Add Marker to Map
+                  </button>
+                </form>
               </div>
 
               {/* Saved runs (only visible when logged in) */}

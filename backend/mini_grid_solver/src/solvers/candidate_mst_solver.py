@@ -12,15 +12,19 @@ from .base_mini_grid_solver import BaseMiniGridSolver
 from ..utils.models import *
 
 # For Voronoi candidates:
-MIN_DIST_TO_TERMINAL = 8.0,
+MIN_DIST_TO_TERMINAL = 10.0,
 MAX_CIRCUMRADIUS = 300.0
 MIN_CANDIDATE_SEPARATION = 10.0
 
 MIN_POLE_TO_TERMINAL = 10.0
 MAX_POLE_TO_TERMINAL_LV = 30.0
+# MAX_POLE_TO_TERMINAL_HV = 50.0
 
 MIN_POLE_TO_POLE = 10.0
 MAX_POLE_TO_POLE_LV = 30.0
+# MAX_POLE_TO_POLE_HV = 50.0
+
+MAX_EDGE_DIST_PENALTY = 10000
 
 
 class CandidateMSTSolver(BaseMiniGridSolver):
@@ -71,9 +75,9 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         """
 
-        pole_cost = float(costs.get("poleCost", 1000.0))
-        low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 4.0))
-        high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 10.0))
+        pole_cost = float(costs.get("poleCost", 100.0))
+        low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 10.0))
+        high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 20.0))
 
         DG = nx.DiGraph()
 
@@ -82,7 +86,9 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             for h in terminal_indices:
                 d = dist_matrix[p, h]
                 if 0.1 < d:
+                    # cost of wire
                     w = d * low_voltage_cost_per_meter
+
                     DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
         # Bidirectional pole ↔ pole (undirected spans)
@@ -99,7 +105,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         for p in pole_indices:
             d = dist_matrix[source_idx, p]
             if 0.1 < d:
-                w = (d * low_voltage_cost_per_meter) + pole_cost // 2
+                w = (d * low_voltage_cost_per_meter) + pole_cost
                 DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
 
         return DG
@@ -139,7 +145,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                         removed = True
         return arbo
 
-    def fragment_long_edges_with_coords(
+    def split_long_edges_with_coords(
             self,
             mst: nx.DiGraph,
             nodes: List,
@@ -247,7 +253,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return new_mst, new_nodes
 
-    def generate_voronoi_candidates(self, coords: np.ndarray) -> np.ndarray:
+    def generate_voronoi_candidates(self, coords: np.ndarray, debug=False) -> np.ndarray:
         """
         Generates candidate pole locations from Voronoi vertices with filtering.
         Final step: removes candidates closer than MIN_CANDIDATE_SEPARATION meters.
@@ -284,7 +290,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         candidates = np.unique(np.round(candidates, decimals=6), axis=0)
 
         if len(candidates) <= 1:
-            print(f"Generated {len(candidates)} unique Voronoi candidate poles")
+            if debug:
+                print(f"Generated {len(candidates)} unique Voronoi candidate poles")
             return candidates
 
         # ─── Step 2: Enforce minimum separation (new) ───────────────────────────
@@ -311,9 +318,10 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         candidates = np.array(kept)
 
-        print(f"Generated {len(candidates)} Voronoi candidate poles "
-              f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
-              f"(from {len(vor.vertices)} vertices)")
+        if debug:
+            print(f"Generated {len(candidates)} Voronoi candidate poles "
+                  f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
+                  f"(from {len(vor.vertices)} vertices)")
 
         return candidates
 
@@ -350,7 +358,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         # (Real 120° construction is more involved — this is fast & reasonable)
         return np.mean(pts, axis=0)
 
-    def generate_fermat_candidates(self, coords: np.ndarray, max_candidates: int = 30) -> np.ndarray:
+    def generate_fermat_candidates(self, coords: np.ndarray, max_candidates: int = 30,
+                                   debug: bool = False) -> np.ndarray:
         """
         Generate candidate pole locations using approximate Fermat-Torricelli points
         from Delaunay triangles. These are more "Steiner-like" than Voronoi vertices.
@@ -383,30 +392,14 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         candidates = np.array(candidates)
 
-        # Optional: apply your existing separation filter
-        # (you can reuse the same greedy logic from generate_voronoi_candidates)
-        if len(candidates) > 1:
-            sort_idx = np.argsort(candidates[:, 0])
-            candidates = candidates[sort_idx]
+        # mask candidates too close to terminals
+        mask = (CandidateMSTSolver.haversine_vec(candidates, coords) >= MIN_DIST_TO_TERMINAL).prod(axis=1)
 
-            kept = []
-            kept_array = np.empty((0, 2))
+        candidates = candidates[mask]
 
-            for pt in candidates:
-                if len(kept_array) == 0:
-                    kept.append(pt)
-                    kept_array = np.array([pt])
-                    continue
-
-                dists_to_kept = self.haversine_vec(np.array([pt]), kept_array)[0]
-                if np.all(dists_to_kept >= MIN_CANDIDATE_SEPARATION):
-                    kept.append(pt)
-                    kept_array = np.vstack([kept_array, pt])
-
-            candidates = np.array(kept)
-
-        print(f"Generated {len(candidates)} Fermat-Steiner candidate poles "
-              f"(limited to {max_candidates}, after min separation filter)")
+        if debug:
+            print(f"Generated {len(candidates)} Fermat-Steiner candidate poles "
+                  f"(limited to {max_candidates}, after min separation filter)")
 
         return candidates
 
@@ -503,6 +496,17 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         return filtered
 
     def solve(self) -> SolverResult:
+        """
+        Solves the problem by processing candidate points, building a graph, and computing a
+        minimum spanning arborescence (MST) before postprocessing the result.
+
+        Returns:
+            SolverResult: The result containing details such as edges, node information,
+            and computed metrics including lengths and count of used poles.
+
+        Raises:
+            ValueError: If an unsupported candidate algorithm is specified.
+        """
         coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         # 1. Candidates
@@ -533,9 +537,11 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
 
-        # 5. Prune & fragment
+        # 5. Prune
         mst = self.prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)
-        mst, nodes = self.fragment_long_edges_with_coords(
+
+        # 6. break long line segments
+        mst, nodes = self.split_long_edges_with_coords(
             mst=mst,
             nodes=nodes,
             max_length_m=30.0,
@@ -581,7 +587,13 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         n_orig = len(coords)
 
         for i in range(n_orig):
-            t = "source" if i == source_idx else "terminal"
+            if i == source_idx:
+                t = "source"
+            else:
+                if names[i] == "pole":
+                    t = "pole"
+                else:
+                    t = "terminal"
             nodes.append(Node(
                 index=i,
                 lat=float(coords[i, 0]),

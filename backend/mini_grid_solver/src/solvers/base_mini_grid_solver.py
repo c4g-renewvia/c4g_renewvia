@@ -76,7 +76,7 @@ class BaseMiniGridSolver(ABC):
         return 6371000 * c  # shape (n_candidates, n_buildings)
 
     @staticmethod
-    def parse_input(request: SolverRequest):
+    def parse_input(request: SolverRequest, debug: bool = False):
         """
         Parses input request containing information about geographical points, costs, and their attributes to generate structured
         data suitable for optimization tasks.
@@ -121,8 +121,12 @@ class BaseMiniGridSolver(ABC):
             coords_list.append([lat, lng])
 
             # Name handling
-            raw_name = p.get("name")
-            name = str(raw_name).strip() if raw_name is not None else f"Location {i + 1}"
+            raw_name = p.get("Name")
+            if raw_name is not None:
+                name = f"{str(raw_name).strip()} {i + 1}"
+            else:
+                name = f"Location {i + 1}"
+
             names.append(name)
 
             # Source detection (case-insensitive, more flexible)
@@ -137,7 +141,8 @@ class BaseMiniGridSolver(ABC):
         coords = np.array(coords_list, dtype=np.float64)
 
         if source_idx is None:
-            print("No explicit power source found → using first point (index 0)")
+            if debug:
+                print("No explicit power source found → using first point (index 0)")
             source_idx = 0
             names[0] = "Power Source"
 
@@ -166,7 +171,7 @@ class BaseMiniGridSolver(ABC):
             return self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
         self._coords, self._terminal_indices, self._source_idx, self._names, self._costs = self.parse_input(
-            self.request)
+            self.request, debug=self.request.debug)
 
         # You can add more validation / normalization here if desired
         if len(self._coords) < 2:

@@ -16,15 +16,13 @@ DEBUG = 0
 @register_solver
 class IteratedOneSteinerSolver(CandidateMSTSolver):
     """
-    Very simple MST solver that:
+    Solver class for iteratively finding an optimized minimum spanning tree (MST)
+    or arborescence using candidate Steiner point additions.
 
-    - Uses **only the original points** (no candidate poles)
-    - Computes an undirected MST on all points
-    - Orients edges away from the source (makes it a tree rooted at source)
-    - Assigns all connections as "low voltage" (can be changed later)
-    - No fragmentation, no pruning, no extra poles
-
-    Good as a baseline / lower bound reference.
+    This class extends the CandidateMSTSolver to apply iterative refinement via
+    Steiner point insertion and reevaluation of MST/arborescence solutions. It
+    includes visualization utilities, graph construction for arborescence, and a
+    solve method to perform multiple iterations based on candidate generation.
     """
 
     def _plot_current_tree(
@@ -36,12 +34,22 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             filename=None  # if given → save to file instead of show
     ):
         """
-        Quick visualization of the current tree state.
-        - Blue = source
-        - Red = terminals (houses)
-        - Black = poles (existing + newly added)
-        - Newly added pole = orange star
-        - Edges = green lines
+        Plots the current state of the tree after adding a candidate point. This visualization includes the
+        source, terminal nodes, poles, and edges between the nodes. Optionally, it highlights any newly
+        added candidate point and allows saving the plot to a file.
+
+        Args:
+            nodes_list (List[Node]): A list of nodes where each node contains its coordinates, type,
+                and index. Each node is expected to have attributes like `coord_tuple` (a tuple of
+                latitude and longitude), `type` (e.g., "source", "terminal", "pole"), and `index`
+                (an identifier for mapping edges).
+            mst_or_arbo (nx.Graph or nx.DiGraph): The graph representing the tree structure, consisting
+                of nodes and edges (can be minimum spanning tree or arborescence).
+            added_point (tuple or list, optional): The coordinates of the newly added candidate pole.
+                Defaults to None if no new pole is added.
+            title (str): The title of the plot. Defaults to "Current tree after candidate addition".
+            filename (str, optional): The file path to save the plot. If specified, the plot will be saved
+                to this location instead of being displayed. Defaults to None.
         """
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.set_title(title)
@@ -174,6 +182,48 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         return DG
 
     def solve(self) -> SolverResult:
+        """
+        Executes an iterative algorithm to optimize network topology, introducing new points (poles)
+        to minimize the cost and maximize the efficiency of the resulting graph, evaluated using
+        Minimum Spanning Tree and related techniques. The method incorporates multiple candidate
+        generation strategies like Voronoi and Fermat points to identify potential new locations
+        to add to the network, and iteratively improves the network structure until stagnation or
+        a convergence criteria is met.
+
+        Returns:
+            SolverResult: The final optimized result, including the list of edges, used nodes,
+            total lengths for low and high voltage components, number of poles, and optionally
+            debug information.
+
+        Raises:
+            Exception: Handles and suppresses errors during candidate evaluation, ensuring robust
+            iteration through all valid candidates without halting the process. Any exceptions
+            encountered during graph construction or candidate validation are logged.
+
+        Attributes:
+            coord (list): List of [latitude, longitude] or [longitude, latitude] coordinates,
+                depending on the indexing used. It represents the current node positions.
+            source_idx (int): Index of the source node in the network topology.
+            terminal_indices (list[int]): A list of indices representing terminal nodes in the
+                network infrastructure.
+            names (list[str]): The names of the nodes, initially populated with existing nodes
+                and expanded during the addition of new candidates (e.g., poles).
+            costs (Any): Represents the cost parameters or weight metrics involved in determining
+                the optimal network construction.
+            cur_total_weight (float): Tracks the total weight or cost of the current network
+                configuration.
+            cur_edges (Any): Holds the edges of the current spanning tree or network structure.
+            DEBUG (int): Configurable debug level controlling verbosity and intermediate output
+                visualization, if enabled.
+
+        Note:
+            - The method internally utilizes helper functions and sub-procedures for tasks like
+              candidate generation, MST calculation, and pruning operations.
+            - The algorithm may incorporate small controlled deteriorations (e.g., <1% worsening
+              in cost) to escape local minima or plateaus in the optimization landscape.
+            - Debugging tools and plotting utilities are conditionally executed, based on the provided
+              debug configuration.
+        """
         coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         # We'll keep coords as list for easier appending

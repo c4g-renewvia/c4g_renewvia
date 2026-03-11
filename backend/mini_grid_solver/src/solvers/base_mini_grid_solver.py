@@ -34,6 +34,10 @@ class BaseMiniGridSolver(ABC):
 
     # ─── Static Helper methods ───────────────────────────────────────────────
     @staticmethod
+    def is_duplicate(c, existing):
+        return any(np.allclose(c, np.array(p), atol=1e-6) for p in existing)
+
+    @staticmethod
     def haversine_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
         """Calculate the great-circle distance between two points on Earth in meters.
 

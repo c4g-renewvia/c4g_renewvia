@@ -1,17 +1,17 @@
 # src/solvers/simple_mst_solver.py
 import networkx as nx
-from matplotlib import collections as mc
-from matplotlib import pyplot as plt
 
 from .candidate_mst_solver import CandidateMSTSolver, np, MAX_POLE_TO_POLE_LV, MAX_EDGE_DIST_PENALTY, \
     MAX_POLE_TO_TERMINAL_LV
 from .registry import register_solver
 from ..utils.models import SolverResult
 
-LENGTH_PENALTY_MULTIPLIER = 1.2
+from matplotlib import pyplot as plt
+from matplotlib import collections as mc
 
-DEBUG = False
+LENGTH_PENALTY_MULTIPLIER = 10
 
+DEBUG = 0
 
 @register_solver
 class IteratedOneSteinerSolver(CandidateMSTSolver):
@@ -140,20 +140,22 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     w = d * low_voltage_cost_per_meter
 
                     if d > MAX_POLE_TO_TERMINAL_LV:
-                        w += MAX_EDGE_DIST_PENALTY
-                        d *= LENGTH_PENALTY_MULTIPLIER
+                        w *= LENGTH_PENALTY_MULTIPLIER
 
                     DG.add_edge(p, h, weight=w, length=d, voltage="low")
+
+        # dummy self-loop edge for adding the pole cost
+        # for p in pole_indices:
+        #     DG.add_edge(p, p, weight=pole_cost * 100000, length=0, voltage="low")
 
         # Bidirectional pole ↔ pole (undirected spans)
         for i in range(len(pole_indices)):
             for j in range(i + 1, len(pole_indices)):
                 p1, p2 = pole_indices[i], pole_indices[j]
                 d = dist_matrix[p1, p2]
-                w = (d * low_voltage_cost_per_meter) + pole_cost // 2
+                w = (d * low_voltage_cost_per_meter) + pole_cost
                 if d > MAX_POLE_TO_POLE_LV:
-                    w += MAX_EDGE_DIST_PENALTY
-                    d *= LENGTH_PENALTY_MULTIPLIER
+                    w *= LENGTH_PENALTY_MULTIPLIER
 
                 if 0.1 < d:
                     DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
@@ -165,8 +167,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             if 0.1 < d:
                 w = (d * low_voltage_cost_per_meter) + pole_cost
                 if d > MAX_POLE_TO_POLE_LV:
-                    w += MAX_EDGE_DIST_PENALTY
-                    d *= LENGTH_PENALTY_MULTIPLIER
+                    w *= LENGTH_PENALTY_MULTIPLIER
 
                 DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
 
@@ -183,38 +184,42 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         iteration = 0
 
         cur_total_weight = np.inf
+        cur_edges = None
 
         while True:
             iteration += 1
-
-            if DEBUG:
-                print(f"\nIteration {iteration}")
+            print(f"\nIteration {iteration}")
 
             # Generate candidates based on current points
-            voronoi_coords = self.generate_voronoi_candidates(np.array(current_coords), debug=DEBUG)
-            fermat_coords = self.generate_fermat_candidates(np.array(current_coords), max_candidates=100, debug=DEBUG)
+            voronoi_coords = self.generate_voronoi_candidates(np.array(current_coords))
+            fermat_coords = self.generate_fermat_candidates(np.array(current_coords), max_candidates=100)
             candidates = np.concatenate([voronoi_coords, fermat_coords], axis=0)
 
             # remove duplicates
             candidates = np.unique(candidates, axis=0)
 
-            best_length = np.inf
+            best_cost = np.inf
             best_max_edge = 0
             best_candidate = None
-            best_arbo = None
             best_pruned_mst = None
             best_nodes = None
+            best_edges = None
+
+
+            if cur_edges is not None:
+                collinear_coords = self.generate_collinear_candidates(np.array(current_coords), cur_edges, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3)
+                if len(collinear_coords) > 0:
+                    candidates = np.concatenate([candidates, collinear_coords], axis=0)
 
             for c in candidates:
-                if tuple(c) in added_candidates:
+                if self.is_duplicate(c, added_candidates):
                     continue
 
                 # Build temporary point set with this candidate
                 trial_coords = np.vstack([current_coords, c])
                 trial_names = current_names
 
-                trial_nodes = self._build_nodes(np.array(current_coords), [c], source_idx, terminal_indices,
-                                                trial_names)
+                trial_nodes = self._build_nodes(np.array(current_coords), [c], source_idx, terminal_indices, trial_names)
                 trial_dist_matrix = self.compute_distance_matrix(trial_coords)
 
                 pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
@@ -227,9 +232,10 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
                     pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-                    total_length = sum(pruned.get_edge_data(*e)["length"] for e in pruned.edges())
+                    total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
 
-                    if DEBUG:
+
+                    if DEBUG >= 2:
                         self._plot_current_tree(
                             trial_nodes,
                             pruned,
@@ -238,38 +244,38 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                             filename=None
                         )
 
-                    if total_length < best_length:
-                        best_length = total_length
+                    if total_cost < best_cost:
+                        best_cost = total_cost
                         best_max_edge = max(pruned.get_edge_data(*e)["length"] for e in pruned.edges())
                         best_candidate = c
-                        best_arbo = arbo
                         best_pruned_mst = pruned
                         best_nodes = trial_nodes
+                        best_edges = pruned.edges()
 
                 except Exception as e:
                     print(f"Candidate {c} failed: {e}")
                     continue
 
             # ─── Decide whether to accept ──────────────────────────────────────
-            if best_length >= cur_total_weight * 0.999:  # allow tiny worsening to escape plateaus if needed
-                if DEBUG:
-                    print("No meaningful improvement found → stopping")
+            if best_cost >= cur_total_weight * 0.999:  # allow tiny worsening to escape plateaus if needed
+                print("No meaningful improvement found → stopping")
                 break
 
             # Accept the winner
-            if DEBUG:
-                print(
-                    f"→ Adding candidate {best_candidate} → new length: {best_length:.2f} m (max edge: {best_max_edge:.2f} m)")
+            print(
+                f"→ Adding candidate {best_candidate} → new length: {best_cost:.2f} m (max edge: {best_max_edge:.2f} m)")
 
+            # set current coordinates
             added_candidates.append(tuple(best_candidate))
             current_coords = np.vstack([current_coords, best_candidate])
             current_names.append("pole")
 
-            cur_total_weight = best_length
+            cur_total_weight = best_cost
+            cur_edges = best_edges
 
             # ─── PLOT THE WINNING STATE AFTER ADDITION ─────────────────────────
-            if DEBUG:
-                plot_title = f"Iteration {iteration} – Added pole at {best_candidate} (length: {best_length:.1f} m)"
+            if DEBUG >= 2:
+                plot_title = f"Iteration {iteration} – Added pole at {best_candidate} (length: {best_cost:.1f} m)"
 
                 self._plot_current_tree(
                     best_nodes,
@@ -278,6 +284,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     title=plot_title,
                     filename=None
                 )
+
 
         nodes = self._build_nodes(np.array(current_coords), [], source_idx, terminal_indices, current_names)
 
@@ -293,12 +300,21 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     pole_counter += 1
                 used_nodes.append(node)
 
-        pruned_and_split, updated_nodes = self.split_long_edges_with_coords(best_pruned_mst, used_nodes)
+
+        best_pruned_mst, used_nodes = self.split_long_edges_with_coords(best_pruned_mst, used_nodes)
 
         # 7. Build edges + lengths
-        edges, total_low_m, total_high_m = self._build_edges_and_lengths(pruned_and_split, updated_nodes)
+        edges, total_low_m, total_high_m = self._build_edges_and_lengths(best_pruned_mst, used_nodes)
 
         num_poles = sum(1 for n in used_nodes if n.type == "pole")
+
+        if DEBUG >= 1:
+            print(max([l.lengthMeters for l in edges]))
+            self._plot_current_tree(
+                used_nodes,
+                best_pruned_mst,
+                title="Best Final Plot",
+            )
 
         debug = {
             "method": "classic_mst_fermat",

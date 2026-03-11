@@ -1,4 +1,5 @@
 # # backend/mst.py
+import math
 from typing import Tuple
 
 import networkx as nx
@@ -91,12 +92,16 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
                     DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
+        # dummy self-loop edge for adding the pole cost
+        for p in pole_indices:
+            DG.add_edge(p, p, weight=pole_cost * 1000, length=0, voltage="low")
+
         # Bidirectional pole ↔ pole (undirected spans)
         for i in range(len(pole_indices)):
             for j in range(i + 1, len(pole_indices)):
                 p1, p2 = pole_indices[i], pole_indices[j]
                 d = dist_matrix[p1, p2]
-                w = (d * low_voltage_cost_per_meter) + pole_cost // 2
+                w = (d * low_voltage_cost_per_meter)
                 if 0.1 < d:
                     DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
                     DG.add_edge(p2, p1, weight=w, length=d, voltage="low")
@@ -144,6 +149,87 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                         arbo.remove_node(leaf)
                         removed = True
         return arbo
+
+    def _great_circle_intermediates(
+            self,
+            lat1: float, lon1: float,
+            lat2: float, lon2: float,
+            max_length: float
+    ) -> List[Tuple[float, float]]:
+        """
+        Calculates intermediate points on the great-circle path between two geographical coordinates.
+
+        This function computes a series of intermediate latitude and longitude points along the
+        great-circle path between two given geographical coordinates, ensuring that the
+        distance between consecutive points does not exceed a specified maximum length.
+
+        Args:
+            lat1: Latitude of the starting point in decimal degrees.
+            lon1: Longitude of the starting point in decimal degrees.
+            lat2: Latitude of the ending point in decimal degrees.
+            lon2: Longitude of the ending point in decimal degrees.
+            max_length: Maximum allowed distance between consecutive points in meters.
+
+        Returns:
+            List of tuples representing the latitude and longitude of each point along
+            the path, including the starting and ending points.
+        """
+        d = self.haversine_meters(lat1, lon1, lat2, lon2)
+        if d <= max_length:
+            return [(lat1, lon1), (lat2, lon2)]
+
+        n_segments = math.ceil(d / max_length)
+        n_inter = n_segments - 1
+        step_dist = d / n_segments
+
+        points = [(lat1, lon1)]
+
+        # Very simple linear interpolation in lat/lon space (good enough for short distances < few km)
+        # For higher accuracy over long distances → use proper great-circle intermediate formula
+        for k in range(1, n_inter + 1):
+            frac = k / n_segments
+            lat = lat1 + frac * (lat2 - lat1)
+            lon = lon1 + frac * (lon2 - lon1)
+            points.append((lat, lon))
+
+        points.append((lat2, lon2))
+        return points
+
+    def generate_collinear_candidates(self, coords, current_tree_edges, max_length=30.0, num_per_edge=3):
+        """
+        Generates a list of candidate points that are collinear to specified tree edges.
+        Each candidate is identified based on the coordinates of the original points and
+        computed intermediate points. This function is typically used to refine or enhance
+        a point set along edges that exceed a specified length threshold.
+
+        Args:
+            coords: A list of coordinates. values are tuples of coordinates (latitude, longitude)
+                representing the positions of the nodes.
+            current_tree_edges: A list of edges defining the current
+                tree. Each edge is represented as a tuple of two node indices.
+            max_length (float, optional): The maximum length of an edge segment in meters.
+                If an edge exceeds this length, intermediate points are calculated.
+                Defaults to 30.0.
+            num_per_edge (int, optional): The approximate number of points to add per
+                segment along an edge if it is split. Determines the spacing between the
+                intermediate points. Defaults to 3.
+
+        Returns:
+            numpy.ndarray: An array of unique candidate points, where each point is
+                represented as a pair of latitude and longitude coordinates.
+
+        """
+        candidates = []
+        for u, v in current_tree_edges:  # assume edges from arbo/pruned
+            p1 = coords[u]
+            p2 = coords[v]
+            d = self.haversine_meters(p1[0], p1[1], p2[0], p2[1])
+            if d > max_length:
+                # Use your _great_circle_intermediates or similar
+                intermediates = self._great_circle_intermediates(p1[0], p1[1], p2[0], p2[1], max_length / num_per_edge)
+                for inter in intermediates[1:-1]:  # skip endpoints
+                    candidates.append(np.array(inter))
+        return np.unique(np.array(candidates), axis=0)  # dedup
 
     def split_long_edges_with_coords(
             self,
@@ -253,7 +339,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return new_mst, new_nodes
 
-    def generate_voronoi_candidates(self, coords: np.ndarray, debug=False) -> np.ndarray:
+    def generate_voronoi_candidates(self, coords: np.ndarray) -> np.ndarray:
         """
         Generates candidate pole locations from Voronoi vertices with filtering.
         Final step: removes candidates closer than MIN_CANDIDATE_SEPARATION meters.
@@ -290,8 +376,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         candidates = np.unique(np.round(candidates, decimals=6), axis=0)
 
         if len(candidates) <= 1:
-            if debug:
-                print(f"Generated {len(candidates)} unique Voronoi candidate poles")
+            print(f"Generated {len(candidates)} unique Voronoi candidate poles")
             return candidates
 
         # ─── Step 2: Enforce minimum separation (new) ───────────────────────────
@@ -318,10 +403,9 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         candidates = np.array(kept)
 
-        if debug:
-            print(f"Generated {len(candidates)} Voronoi candidate poles "
-                  f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
-                  f"(from {len(vor.vertices)} vertices)")
+        print(f"Generated {len(candidates)} Voronoi candidate poles "
+              f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
+              f"(from {len(vor.vertices)} vertices)")
 
         return candidates
 
@@ -358,8 +442,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         # (Real 120° construction is more involved — this is fast & reasonable)
         return np.mean(pts, axis=0)
 
-    def generate_fermat_candidates(self, coords: np.ndarray, max_candidates: int = 30,
-                                   debug: bool = False) -> np.ndarray:
+    def generate_fermat_candidates(self, coords: np.ndarray, max_candidates: int = 30) -> np.ndarray:
         """
         Generate candidate pole locations using approximate Fermat-Torricelli points
         from Delaunay triangles. These are more "Steiner-like" than Voronoi vertices.
@@ -397,9 +480,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         candidates = candidates[mask]
 
-        if debug:
-            print(f"Generated {len(candidates)} Fermat-Steiner candidate poles "
-                  f"(limited to {max_candidates}, after min separation filter)")
+        print(f"Generated {len(candidates)} Fermat-Steiner candidate poles "
+              f"(limited to {max_candidates}, after min separation filter)")
 
         return candidates
 
@@ -539,6 +621,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         # 5. Prune
         mst = self.prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)
+
 
         # 6. break long line segments
         mst, nodes = self.split_long_edges_with_coords(

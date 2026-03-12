@@ -28,7 +28,7 @@ class SimpleMSTSolver(BaseMiniGridSolver):
 
     def solve(self) -> SolverResult:
         # 1. Parse input
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=True)
 
         n = len(coords)
         if n < 2:

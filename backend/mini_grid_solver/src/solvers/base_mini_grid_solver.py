@@ -151,7 +151,7 @@ class BaseMiniGridSolver(ABC):
             # Name handling
             raw_name = p.get("name")
 
-            if poles and "pole" in raw_name.lower():
+            if not poles and "pole" in raw_name.lower():
                 continue
 
             if raw_name is not None:

@@ -115,14 +115,14 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return DG
 
-    def extract_used_nodes(self, best_pruned_mst, nodes):
+    def extract_used_nodes(self, mst, nodes):
         """
         Extracts and processes nodes that are used within the provided pruned minimum
         spanning tree (MST). Marks the nodes as used, assigns them a name if they are
         of type "pole" and lack a name, and returns the list of used nodes.
 
         Args:
-            best_pruned_mst: The pruned minimum spanning tree used to determine which
+            mst: The pruned minimum spanning tree used to determine which
                 nodes to mark and process.
             nodes: A list of nodes, where each node has attributes such as `index`,
                 `used`, `type`, and `name`.
@@ -131,7 +131,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             list: A list of nodes that are used, with appropriate properties updated
             based on the given MST and node attributes.
         """
-        used_indices = set(best_pruned_mst.nodes)
+        used_indices = set(mst.nodes)
         pole_counter = 1
         used_nodes = []
         for node in nodes:
@@ -264,7 +264,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             mst: nx.DiGraph,
             nodes: List,
             max_length_m: float = 30.0,
-            min_segment_length: float = 5.0,
+            min_segment_length: float = 25.0,
     ) -> Tuple[nx.DiGraph, List]:
         """
         Break long edges (> max_length_m meters) into multiple shorter segments by
@@ -294,7 +294,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             length_m = data.get("length", 0.0)
             voltage = data.get("voltage", "unknown")
 
-            if length_m <= max_length_m:
+            if abs(length_m - max_length_m) < 2:
                 # Short enough → copy edge as-is
                 new_mst.add_edge(u, v, **data)
                 continue
@@ -311,7 +311,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             total_length = length_m  # already in meters
 
             # How many full segments do we want?
-            num_segments = max(2, int(np.ceil(total_length / max_length_m)))
+            num_segments = max(2, int(np.floor(total_length / max_length_m)))
             segment_length = total_length / num_segments
 
             if segment_length < min_segment_length:
@@ -348,6 +348,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                     next_index,
                     length=segment_length,
                     voltage=voltage,
+                    weight=0,
                     # copy any other attributes you care about
                 )
 
@@ -360,6 +361,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 v,
                 length=segment_length,
                 voltage=voltage,
+                weight=0,
             )
 
         # Optional: copy graph-level attributes if any exist

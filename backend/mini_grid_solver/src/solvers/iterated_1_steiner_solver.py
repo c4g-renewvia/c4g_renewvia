@@ -1,17 +1,16 @@
 # src/solvers/simple_mst_solver.py
 import networkx as nx
+import numpy as np
+from matplotlib import collections as mc
+from matplotlib import pyplot as plt
+from sklearn.cluster import KMeans
 
-from .candidate_mst_solver import CandidateMSTSolver, np, MAX_POLE_TO_POLE_LV, MAX_EDGE_DIST_PENALTY, \
-    MAX_POLE_TO_TERMINAL_LV
+from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
 from .registry import register_solver
 from ..utils.models import SolverResult
 
-from matplotlib import pyplot as plt
-from matplotlib import collections as mc
+DEBUG = 1
 
-LENGTH_PENALTY_MULTIPLIER = 10
-
-DEBUG = 0
 
 @register_solver
 class IteratedOneSteinerSolver(CandidateMSTSolver):
@@ -33,47 +32,34 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             title="Current tree after candidate addition",
             filename=None  # if given → save to file instead of show
     ):
-        """
-        Plots the current state of the tree after adding a candidate point. This visualization includes the
-        source, terminal nodes, poles, and edges between the nodes. Optionally, it highlights any newly
-        added candidate point and allows saving the plot to a file.
-
-        Args:
-            nodes_list (List[Node]): A list of nodes where each node contains its coordinates, type,
-                and index. Each node is expected to have attributes like `coord_tuple` (a tuple of
-                latitude and longitude), `type` (e.g., "source", "terminal", "pole"), and `index`
-                (an identifier for mapping edges).
-            mst_or_arbo (nx.Graph or nx.DiGraph): The graph representing the tree structure, consisting
-                of nodes and edges (can be minimum spanning tree or arborescence).
-            added_point (tuple or list, optional): The coordinates of the newly added candidate pole.
-                Defaults to None if no new pole is added.
-            title (str): The title of the plot. Defaults to "Current tree after candidate addition".
-            filename (str, optional): The file path to save the plot. If specified, the plot will be saved
-                to this location instead of being displayed. Defaults to None.
-        """
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.set_title(title)
         ax.set_xlabel("Longitude")
         ax.set_ylabel("Latitude")
         ax.set_aspect('equal')
 
-        # Extract coordinates
-        coords = np.array([n.coord_tuple for n in nodes_list])  # assume .coord_tuple = (lng, lat) or (lat, lng)
+        # 1. Safely map indices to their true coordinates
+        coord_dict = {n.index: n.coord_tuple for n in nodes_list}
 
-        # Plot nodes
-        source_idx = [n.index for n in nodes_list if n.type == "source"][0]
-        term_indices = [n.index for n in nodes_list if n.type == "terminal"]
-        pole_indices = [n.index for n in nodes_list if n.type == "pole"]
+        # 2. Extract specific coordinates by type
+        source_coords = [n.coord_tuple for n in nodes_list if n.type == "source"]
+        term_coords = [n.coord_tuple for n in nodes_list if n.type == "terminal"]
+        pole_coords = [n.coord_tuple for n in nodes_list if n.type == "pole"]
 
-        # Source
-        ax.scatter(coords[source_idx, 1], coords[source_idx, 0], c='blue', s=120, marker='s', label='Source')
+        # Plot Source
+        if source_coords:
+            sc = np.array(source_coords)
+            ax.scatter(sc[:, 1], sc[:, 0], c='blue', s=120, marker='s', label='Source')
 
-        # Terminals
-        ax.scatter(coords[term_indices, 1], coords[term_indices, 0], c='red', s=80, marker='o', label='Terminals')
+        # Plot Terminals
+        if term_coords:
+            tc = np.array(term_coords)
+            ax.scatter(tc[:, 1], tc[:, 0], c='red', s=80, marker='o', label='Terminals')
 
-        # Existing poles
-        if pole_indices:
-            ax.scatter(coords[pole_indices, 1], coords[pole_indices, 0], c='black', s=60, marker='^', label='Poles')
+        # Plot Existing poles
+        if pole_coords:
+            pc = np.array(pole_coords)
+            ax.scatter(pc[:, 1], pc[:, 0], c='black', s=60, marker='^', label='Poles')
 
         # Highlight newly added candidate
         if added_point is not None:
@@ -83,9 +69,11 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         # Plot edges
         edge_lines = []
         for u, v in mst_or_arbo.edges():
-            pt_u = coords[u, [1, 0]]  # [lng, lat] → [x, y] for plot
-            pt_v = coords[v, [1, 0]]
-            edge_lines.append([pt_u, pt_v])
+            # Safely look up the exact coordinate using the node's unique index
+            if u in coord_dict and v in coord_dict:
+                pt_u = [coord_dict[u][1], coord_dict[u][0]]  # [lng, lat]
+                pt_v = [coord_dict[v][1], coord_dict[v][0]]
+                edge_lines.append([pt_u, pt_v])
 
         if edge_lines:
             lc = mc.LineCollection(edge_lines, colors='green', linewidths=1.5, alpha=0.7)
@@ -139,7 +127,31 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
         DG = nx.DiGraph()
 
-        # Directed: poles → terminals (service drops)
+        # 1: source → poles (main trunk)
+        for p in pole_indices:
+            d = dist_matrix[source_idx, p]
+            if 0.1 < d:
+                w = (d * low_voltage_cost_per_meter)
+                extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
+                w += extra_poles_needed * pole_cost
+
+                DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
+
+        # 2: Bidirectional pole ↔ pole (undirected spans)
+        for i in range(len(pole_indices)):
+            for j in range(i + 1, len(pole_indices)):
+                p1, p2 = pole_indices[i], pole_indices[j]
+                d = dist_matrix[p1, p2]
+
+                # cost of wire and pole
+                w = (d * low_voltage_cost_per_meter)
+                extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
+                w += extra_poles_needed * pole_cost
+
+                if 0.1 < d:
+                    DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
+
+        # 3: poles → terminals (service drops)
         for p in pole_indices:
             for h in terminal_indices:
                 d = dist_matrix[p, h]
@@ -147,39 +159,188 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     # cost of wire
                     w = d * low_voltage_cost_per_meter
 
-                    if d > MAX_POLE_TO_TERMINAL_LV:
-                        w *= LENGTH_PENALTY_MULTIPLIER
+                    extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
+                    w += extra_poles_needed * pole_cost
 
                     DG.add_edge(p, h, weight=w, length=d, voltage="low")
 
-        # dummy self-loop edge for adding the pole cost
-        # for p in pole_indices:
-        #     DG.add_edge(p, p, weight=pole_cost * 100000, length=0, voltage="low")
-
-        # Bidirectional pole ↔ pole (undirected spans)
-        for i in range(len(pole_indices)):
-            for j in range(i + 1, len(pole_indices)):
-                p1, p2 = pole_indices[i], pole_indices[j]
-                d = dist_matrix[p1, p2]
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                if d > MAX_POLE_TO_POLE_LV:
-                    w *= LENGTH_PENALTY_MULTIPLIER
-
-                if 0.1 < d:
-                    DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
-                    DG.add_edge(p2, p1, weight=w, length=d, voltage="low")
-
-        # Directed: source → poles (main trunk)
-        for p in pole_indices:
-            d = dist_matrix[source_idx, p]
-            if 0.1 < d:
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                if d > MAX_POLE_TO_POLE_LV:
-                    w *= LENGTH_PENALTY_MULTIPLIER
-
-                DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
-
         return DG
+
+    def generate_cluster_center_candidates(self, coords, min_clusters=2, max_clusters=15, n_init=10):
+        """
+        Generate candidate pole locations as centers of K-Means clusters.
+
+        - Tries multiple k values and takes all unique centers
+        - Filters very small clusters (e.g. < 3 points)
+        """
+        if len(coords) < 6:
+            return np.array([])  # too few points → no meaningful clusters
+
+        candidates = []
+        coords_array = np.array(coords)  # shape (n, 2) [lat, lng] or [lng, lat]
+
+        print(len(coords) // 3)
+
+        for k in range(len(coords) // 2, len(coords) // 2 + 2):
+            try:
+                kmeans = KMeans(n_clusters=k, n_init=n_init, random_state=42)
+                kmeans.fit(coords_array)
+                centers = kmeans.cluster_centers_
+
+                # Optional: only keep centers of clusters with >= min_points
+                labels, counts = np.unique(kmeans.labels_, return_counts=True)
+                valid_centers = centers[counts >= 2]  # at least  points per cluster
+
+                candidates.extend(valid_centers)
+            except Exception as e:
+                print(f"K-Means k={k} failed: {e}")
+                continue
+
+        if not candidates:
+            return np.array([])
+
+        cluster_centers = np.array(candidates)
+
+        # Deduplicate (very close centers from different k)
+        cluster_centers = np.unique(np.round(cluster_centers, decimals=6), axis=0)
+
+        if DEBUG >= 1:
+            # plot centers
+            fig, ax = plt.subplots(figsize=(10, 8))
+            ax.set_title(f"K-Means Cluster Centers (k={k})")
+            ax.set_xlabel("Longitude")
+            ax.set_ylabel("Latitude")
+            ax.set_aspect('equal')
+            ax.scatter(cluster_centers[:, 1], cluster_centers[:, 0], c='black', s=100, marker='o',
+                       label='Cluster centers')
+            ax.legend(loc='upper right', fontsize=9)
+            ax.grid(True, alpha=0.3)
+            plt.show()
+            plt.close(fig)
+
+        return cluster_centers
+
+    def generate_proximity_fermat_candidates(
+            self,
+            coords: np.ndarray,
+            max_distance: float = 60.0,
+            max_candidates: int = 300
+    ) -> np.ndarray:
+        """
+        Generate candidate pole locations using approximate Fermat-Torricelli points
+        for ANY triplet of nodes where all three nodes are within `max_distance` of each other.
+        """
+        n = len(coords)
+        if n < 3:
+            return np.empty((0, 2), dtype=float)
+
+        # 1. Precompute a localized distance matrix for the coordinates
+        # We do this here because this is called before the main dist_matrix is built
+        dist_matrix = np.zeros((n, n))
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Using the haversine_meters function already in your class
+                d = self.haversine_meters(coords[i, 0], coords[i, 1], coords[j, 0], coords[j, 1])
+                dist_matrix[i, j] = d
+                dist_matrix[j, i] = d
+
+        candidates = []
+
+        # 2. Find all valid triplets (i, j, k) where all pairwise distances are <= max_distance
+        # We use strict combinations (i < j < k) to avoid permutations of the same triangle
+        for i in range(n):
+            for j in range(i + 1, n):
+                if dist_matrix[i, j] > max_distance:
+                    continue  # Skip early if i and j are already too far apart
+
+                for k in range(j + 1, n):
+                    # Check if k is close to BOTH i and j
+                    if dist_matrix[i, k] <= max_distance and dist_matrix[j, k] <= max_distance:
+                        pts = np.array([coords[i], coords[j], coords[k]])
+
+                        # Use your existing fermat calculation
+                        st_pt = self.fermat_torricelli_point(pts)
+                        candidates.append(st_pt)
+
+                        if len(candidates) >= max_candidates:
+                            break
+                if len(candidates) >= max_candidates:
+                    break
+            if len(candidates) >= max_candidates:
+                break
+
+        if not candidates:
+            return np.empty((0, 2), dtype=float)
+
+        candidates = np.array(candidates)
+
+        # 3. Filter candidates that are too close to existing terminals
+        # (Enforcing MIN_DIST_TO_TERMINAL, assuming it's 10.0m)
+        valid_candidates = []
+        for cand in candidates:
+            # Check the minimum distance to any original coordinate
+            min_d = min(self.haversine_meters(cand[0], cand[1], c[0], c[1]) for c in coords)
+            if min_d >= 10.0:
+                valid_candidates.append(cand)
+
+        candidates = np.array(valid_candidates)
+
+        # 4. Deduplicate close overlapping candidates
+        if len(candidates) > 0:
+            candidates = np.unique(np.round(candidates, decimals=6), axis=0)
+
+        print(f"Generated {len(candidates)} Fermat-Steiner candidates from proximity triplets "
+              f"(max_dist={max_distance}m)")
+
+        return candidates
+
+    def generate_candidates(self,
+                            coords,
+                            cur_edges,
+                            terminal_cluster_centers,
+                            added_candidates,
+                            max_length=MAX_POLE_TO_POLE_LV, num_per_edge=2):
+        # Generate candidates based on current points
+        voronoi_candidates = self.generate_voronoi_candidates(np.array(coords))
+        fermat_candidates = self.generate_proximity_fermat_candidates(np.array(coords), max_candidates=100)
+        # candidates =fermat_candidates
+        # candidates = np.empty((0, 2))
+        candidates = np.concatenate([voronoi_candidates, fermat_candidates], axis=0)
+
+        if cur_edges is not None:
+            collinear_candidates = self.generate_collinear_candidates(np.array(coords), cur_edges,
+                                                                      max_length=max_length, num_per_edge=num_per_edge)
+            if len(collinear_candidates) > 0:
+                candidates = np.concatenate([candidates, collinear_candidates], axis=0)
+
+        # remove candidates outside of bounding box
+        coords_bb = self.compute_bounding_box(coords)
+        lat_mask = (coords_bb['min_lat'] <= candidates[:, 0]) * (candidates[:, 0] <= coords_bb['max_lat'])
+        lng_mask = (coords_bb['min_lng'] <= candidates[:, 1]) * (candidates[:, 1] <= coords_bb['max_lng'])
+        mask = lat_mask * lng_mask
+        candidates = candidates[mask]
+
+        candidates = np.concatenate([candidates, terminal_cluster_centers], axis=0)
+
+        # remove candidates already added
+        ac = [tuple(c) for c in added_candidates]
+        candidates = np.array([c for c in candidates if tuple(c) not in ac])
+
+        candidates = np.unique(candidates, axis=0)
+
+        if DEBUG >= 1 and len(candidates) > 0:
+            # plots candidates
+            fig, ax = plt.subplots(figsize=(10, 8))
+            ax.set_title("Generated Candidates")
+            ax.set_xlabel("Longitude")
+            ax.set_ylabel("Latitude")
+            ax.set_aspect('equal')
+            ax.scatter(candidates[:, 1], candidates[:, 0], c='black', s=100, marker='o', label='Candidates')
+            ax.legend(loc='upper right', fontsize=9)
+            ax.grid(True, alpha=0.3)
+            plt.show()
+
+        return candidates
 
     def solve(self) -> SolverResult:
         """
@@ -236,17 +397,26 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         cur_total_weight = np.inf
         cur_edges = None
 
+        terminal_cluster_centers = self.generate_cluster_center_candidates(np.array(coords),
+                                                                           min_clusters=2,
+                                                                           max_clusters=12,
+                                                                           n_init=5)  # lower n_init for speed
+
         while True:
             iteration += 1
             print(f"\nIteration {iteration}")
 
-            # Generate candidates based on current points
-            voronoi_coords = self.generate_voronoi_candidates(np.array(current_coords))
-            fermat_coords = self.generate_fermat_candidates(np.array(current_coords), max_candidates=100)
-            candidates = np.concatenate([voronoi_coords, fermat_coords], axis=0)
+            # get candidate positions
+            candidates = self.generate_candidates(np.array(current_coords),
+                                                  cur_edges,
+                                                  terminal_cluster_centers,
+                                                  added_candidates,
+                                                  max_length=MAX_POLE_TO_POLE_LV,
+                                                  num_per_edge=3)
 
-            # remove duplicates
-            candidates = np.unique(candidates, axis=0)
+            if len(candidates) == 0:
+                print("No candidates found")
+                break
 
             best_cost = np.inf
             best_max_edge = 0
@@ -255,21 +425,14 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             best_nodes = None
             best_edges = None
 
-
-            if cur_edges is not None:
-                collinear_coords = self.generate_collinear_candidates(np.array(current_coords), cur_edges, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3)
-                if len(collinear_coords) > 0:
-                    candidates = np.concatenate([candidates, collinear_coords], axis=0)
-
             for c in candidates:
-                if self.is_duplicate(c, added_candidates):
-                    continue
 
                 # Build temporary point set with this candidate
                 trial_coords = np.vstack([current_coords, c])
                 trial_names = current_names
 
-                trial_nodes = self._build_nodes(np.array(current_coords), [c], source_idx, terminal_indices, trial_names)
+                trial_nodes = self._build_nodes(np.array(current_coords), [c], source_idx, terminal_indices,
+                                                trial_names)
                 trial_dist_matrix = self.compute_distance_matrix(trial_coords)
 
                 pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
@@ -278,36 +441,30 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs
                 )
 
-                try:
-                    arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-                    pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
+                arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
+                pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-                    total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
+                total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
 
+                if DEBUG >= 2:
+                    self._plot_current_tree(
+                        trial_nodes,
+                        pruned,
+                        added_point=c,
+                        title=f"Debug {c}",
+                        filename=None
+                    )
 
-                    if DEBUG >= 2:
-                        self._plot_current_tree(
-                            trial_nodes,
-                            pruned,
-                            added_point=c,
-                            title=f"Debug {c}",
-                            filename=None
-                        )
-
-                    if total_cost < best_cost:
-                        best_cost = total_cost
-                        best_max_edge = max(pruned.get_edge_data(*e)["length"] for e in pruned.edges())
-                        best_candidate = c
-                        best_pruned_mst = pruned
-                        best_nodes = trial_nodes
-                        best_edges = pruned.edges()
-
-                except Exception as e:
-                    print(f"Candidate {c} failed: {e}")
-                    continue
+                if total_cost < best_cost:
+                    best_cost = total_cost
+                    best_max_edge = max(pruned.get_edge_data(*e)["length"] for e in pruned.edges())
+                    best_candidate = c
+                    best_pruned_mst = pruned
+                    best_nodes = trial_nodes
+                    best_edges = pruned.edges()
 
             # ─── Decide whether to accept ──────────────────────────────────────
-            if best_cost >= cur_total_weight * 0.999:  # allow tiny worsening to escape plateaus if needed
+            if best_cost >= cur_total_weight:  # allow tiny worsening to escape plateaus if needed
                 print("No meaningful improvement found → stopping")
                 break
 
@@ -335,23 +492,86 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     filename=None
                 )
 
+        if DEBUG >= 1:
+            self._plot_current_tree(
+                best_nodes,
+                best_pruned_mst,
+                title="Split MST before Drop Phase",
+                added_point=None,
+            )
+
+        # ==========================================
+        # DROP PHASE (REVERSE DELETION)
+        # ==========================================
+        print("\n--- Starting Drop Phase (Reverse Deletion) ---")
+
+        # We need the base original coords to easily rebuild the lists
+        original_coords_array = np.array(coords)
+
+        # Iterate in reverse (unwinding the newest additions first)
+        candidates_to_check = list(reversed(added_candidates))
+
+        for candidate_to_drop in candidates_to_check:
+            # Create a test list of candidates without the current one
+            test_added_candidates = [c for c in added_candidates if tuple(c) != tuple(candidate_to_drop)]
+
+            # Build nodes using the original coords and the TEST candidates
+            trial_nodes = self._build_nodes(
+                original_coords_array,
+                test_added_candidates,
+                source_idx,
+                terminal_indices,
+                names  # Original names
+            )
+
+            # Reconstruct trial_coords for the distance matrix
+            trial_coords = np.array([[n.lat, n.lng] for n in trial_nodes])
+            trial_dist_matrix = self.compute_distance_matrix(trial_coords)
+            pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
+
+            # Build graph and compute MST
+            DG = self.build_directed_graph_for_arborescence(
+                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs
+            )
+
+            arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
+            pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
+
+            total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
+
+            # If dropping the pole makes the cost LOWER or EXACTLY THE SAME, we drop it!
+            # (We prefer fewer poles, so dropping it on a tie is inherently better)
+            if total_cost <= cur_total_weight:
+                print(
+                    f"Drop Phase: Successfully removed redundant pole at {candidate_to_drop}. New cost: {total_cost:.2f}")
+
+                # Permanently update our tracking variables
+                added_candidates = test_added_candidates
+                cur_total_weight = total_cost
+                best_pruned_mst = pruned
+
+                # Update current_coords and current_names to reflect the drop
+                # so the rest of your original post-processing works seamlessly
+                if added_candidates:
+                    current_coords = np.vstack([original_coords_array, added_candidates])
+                else:
+                    current_coords = original_coords_array
+                current_names = list(names) + ["pole"] * len(added_candidates)
+
+        print("--- Drop Phase Complete ---\n")
+        # ==========================================
 
         nodes = self._build_nodes(np.array(current_coords), [], source_idx, terminal_indices, current_names)
 
+        best_pruned_mst, nodes = self.split_long_edges_with_coords(
+            mst=best_pruned_mst,
+            nodes=nodes,
+            max_length_m=MAX_POLE_TO_POLE_LV,
+            min_segment_length=25.0
+        )
+
         # 6. Mark used & name poles
-        used_indices = set(best_pruned_mst.nodes)
-        pole_counter = 1
-        used_nodes = []
-        for node in nodes:
-            if node.index in used_indices:
-                node.used = True
-                if node.type == "pole" and not node.name:
-                    node.name = f"Pole {pole_counter}"
-                    pole_counter += 1
-                used_nodes.append(node)
-
-
-        best_pruned_mst, used_nodes = self.split_long_edges_with_coords(best_pruned_mst, used_nodes)
+        used_nodes = self.extract_used_nodes(best_pruned_mst, nodes)
 
         # 7. Build edges + lengths
         edges, total_low_m, total_high_m = self._build_edges_and_lengths(best_pruned_mst, used_nodes)
@@ -365,6 +585,8 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                 best_pruned_mst,
                 title="Best Final Plot",
             )
+
+
 
         debug = {
             "method": "classic_mst_fermat",

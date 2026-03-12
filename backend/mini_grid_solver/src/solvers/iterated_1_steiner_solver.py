@@ -9,7 +9,7 @@ from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
 from .registry import register_solver
 from ..utils.models import SolverResult
 
-DEBUG = 1
+DEBUG = 0
 
 
 @register_solver
@@ -131,7 +131,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         for p in pole_indices:
             d = dist_matrix[source_idx, p]
             if 0.1 < d:
-                w = (d * low_voltage_cost_per_meter)
+                w = (d * low_voltage_cost_per_meter) + pole_cost
                 extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
                 w += extra_poles_needed * pole_cost
 
@@ -144,7 +144,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                 d = dist_matrix[p1, p2]
 
                 # cost of wire and pole
-                w = (d * low_voltage_cost_per_meter)
+                w = (d * low_voltage_cost_per_meter) + pole_cost
                 extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
                 w += extra_poles_needed * pole_cost
 

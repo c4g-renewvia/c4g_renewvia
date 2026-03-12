@@ -266,14 +266,16 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         candidates = verts[mask]
 
         if len(candidates) == 0:
-            print("No Voronoi candidates after initial filtering")
+            if self.request.debug >= 1:
+                print("No Voronoi candidates after initial filtering")
             return candidates
 
         # ─── Step 1: Deduplicate with rounding (existing) ───────────────────────
         candidates = np.unique(np.round(candidates, decimals=6), axis=0)
 
         if len(candidates) <= 1:
-            print(f"Generated {len(candidates)} unique Voronoi candidate poles")
+            if self.request.debug >= 1:
+                print(f"Generated {len(candidates)} unique Voronoi candidate poles")
             return candidates
 
         # ─── Step 2: Enforce minimum separation (new) ───────────────────────────
@@ -300,9 +302,10 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         candidates = np.array(kept)
 
-        print(f"Generated {len(candidates)} Voronoi candidate poles "
-              f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
-              f"(from {len(vor.vertices)} vertices)")
+        if self.request.debug >= 1:
+            print(f"Generated {len(candidates)} Voronoi candidate poles "
+                  f"after min {MIN_CANDIDATE_SEPARATION}m separation filter "
+                  f"(from {len(vor.vertices)} vertices)")
 
         return candidates
 
@@ -486,7 +489,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         Raises:
             ValueError: If an unsupported candidate algorithm is specified.
         """
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=False)
 
         # 1. Candidates
         if self.candidate_algorithm == 'voronoi':

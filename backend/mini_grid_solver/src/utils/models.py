@@ -16,7 +16,7 @@ class SolverRequest(BaseModel):
     params: Dict[str, Any] = {}
     points: List[Dict[str, Union[float, str, None]]]
     costs: Dict[str, float]
-    debug: bool = False
+    debug: int = 0
 
 
 class Node(BaseModel):

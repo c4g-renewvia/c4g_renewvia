@@ -9,8 +9,6 @@ from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
 from .registry import register_solver
 from ..utils.models import SolverResult
 
-DEBUG = 0
-
 
 @register_solver
 class IteratedOneSteinerSolver(CandidateMSTSolver):
@@ -128,7 +126,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         # Deduplicate (very close centers from different k)
         cluster_centers = np.unique(np.round(cluster_centers, decimals=6), axis=0)
 
-        if DEBUG >= 1:
+        if self.request.debug >= 1:
             # plot centers
             fig, ax = plt.subplots(figsize=(10, 8))
             ax.set_title(f"K-Means Cluster Centers (k={k})")
@@ -148,7 +146,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             self,
             coords: np.ndarray,
             max_distance: float = 60.0,
-            max_candidates: int = 300
+            max_candidates: int = 300,
     ) -> np.ndarray:
         """
         Generate candidate pole locations using approximate Fermat-Torricelli points
@@ -213,8 +211,9 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
         if len(candidates) > 0:
             candidates = np.unique(np.round(candidates, decimals=6), axis=0)
 
-        print(f"Generated {len(candidates)} Fermat-Steiner candidates from proximity triplets "
-              f"(max_dist={max_distance}m)")
+        if self.request.debug >= 1:
+            print(f"Generated {len(candidates)} Fermat-Steiner candidates from proximity triplets "
+                  f"(max_dist={max_distance}m)")
 
         return candidates
 
@@ -226,7 +225,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                             max_length=MAX_POLE_TO_POLE_LV, num_per_edge=2):
         # Generate candidates based on current points
         voronoi_candidates = self.generate_voronoi_candidates(np.array(coords))
-        fermat_candidates = self.generate_proximity_fermat_candidates(np.array(coords), max_candidates=100)
+        fermat_candidates = self.generate_proximity_fermat_candidates(np.array(coords), max_candidates=100 )
         # candidates =fermat_candidates
         # candidates = np.empty((0, 2))
         candidates = np.concatenate([voronoi_candidates, fermat_candidates], axis=0)
@@ -252,7 +251,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
         candidates = np.unique(candidates, axis=0)
 
-        if DEBUG >= 1 and len(candidates) > 0:
+        if self.request.debug >= 1 and len(candidates) > 0:
             # plots candidates
             fig, ax = plt.subplots(figsize=(10, 8))
             ax.set_title("Generated Candidates")
@@ -298,7 +297,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             cur_total_weight (float): Tracks the total weight or cost of the current network
                 configuration.
             cur_edges (Any): Holds the edges of the current spanning tree or network structure.
-            DEBUG (int): Configurable debug level controlling verbosity and intermediate output
+            self.request.debug (int): Configurable debug level controlling verbosity and intermediate output
                 visualization, if enabled.
 
         Note:
@@ -309,7 +308,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             - Debugging tools and plotting utilities are conditionally executed, based on the provided
               debug configuration.
         """
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=False)
 
         # We'll keep coords as list for easier appending
         current_coords = list(coords)  # list of [lat, lng] or [lng, lat] – adjust indexing accordingly
@@ -328,7 +327,8 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
         while True:
             iteration += 1
-            print(f"\nIteration {iteration}")
+            if self.request.debug >= 1:
+                print(f"\nIteration {iteration}")
 
             # get candidate positions
             candidates = self.generate_candidates(np.array(current_coords),
@@ -372,7 +372,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
                 total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
 
-                if DEBUG >= 2:
+                if self.request.debug >= 2:
                     self._plot_current_tree(
                         trial_nodes,
                         pruned,
@@ -407,7 +407,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             cur_edges = best_edges
 
             # ─── PLOT THE WINNING STATE AFTER ADDITION ─────────────────────────
-            if DEBUG >= 2:
+            if self.request.debug >= 2:
                 plot_title = f"Iteration {iteration} – Added pole at {best_candidate} (length: {best_cost:.1f} m)"
 
                 self._plot_current_tree(
@@ -418,7 +418,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                     filename=None
                 )
 
-        if DEBUG >= 1:
+        if self.request.debug >= 1:
             self._plot_current_tree(
                 best_nodes,
                 best_pruned_mst,
@@ -507,7 +507,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
         num_poles = sum(1 for n in used_nodes if n.type == "pole")
 
-        if DEBUG >= 1:
+        if self.request.debug >= 1:
             print(max([l.lengthMeters for l in edges]))
             self._plot_current_tree(
                 used_nodes,

@@ -115,7 +115,7 @@ class BaseMiniGridSolver(ABC):
         return 6371000 * c  # shape (n_candidates, n_buildings)
 
     @staticmethod
-    def parse_input(request: SolverRequest, debug: bool = False):
+    def parse_input(request: SolverRequest, poles: bool = True, debug: bool = False):
         """
         Parses input request containing information about geographical points, costs, and their attributes to generate structured
         data suitable for optimization tasks.
@@ -148,6 +148,23 @@ class BaseMiniGridSolver(ABC):
         }
 
         for i, p in enumerate(points):
+            # Name handling
+            raw_name = p.get("name")
+
+            if poles and "pole" in raw_name.lower():
+                continue
+
+            if raw_name is not None:
+                try:
+                    int(raw_name.split(" ")[-1])
+                    name = raw_name
+                except:
+                    name = f"{str(raw_name).strip()} {i + 1}"
+            else:
+                name = f"Location {i + 1}"
+
+            names.append(name)
+
             try:
                 lat = float(p["lat"])
                 lng = float(p["lng"])
@@ -159,18 +176,7 @@ class BaseMiniGridSolver(ABC):
 
             coords_list.append([lat, lng])
 
-            # Name handling
-            raw_name = p.get("name")
-            if raw_name is not None:
-                try:
-                    int(raw_name.split(" ")[-1])
-                    name = raw_name
-                except:
-                    name = f"{str(raw_name).strip()} {i + 1}"
-            else:
-                name = f"Location {i + 1}"
 
-            names.append(name)
 
             # Source detection (case-insensitive, more flexible)
             name_lower = name.lower()
@@ -240,15 +246,29 @@ class BaseMiniGridSolver(ABC):
 
         return nodes
 
-    def parse_and_validate_input(self) -> Tuple[list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
+    def parse_and_validate_input(self, poles: bool = True) -> Tuple[list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
         """
-        Default robust input parser — most subclasses will just call this.
+        Parses and validates the input data for constructing nodes. This includes parsing input data
+        such as coordinates, source index, terminal indices, names, and costs, as well as ensuring
+        basic operational validity through validation checks and setting default costs if not
+        provided.
+
+        Args:
+            poles (bool): Determines whether poles should be included in the constructed nodes.
+
+        Returns:
+            Tuple[list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
+            A tuple containing the constructed nodes, coordinates, source index,
+            terminal indices, names, and cost mappings.
+
+        Raises:
+            ValueError: If the input does not contain at least one source and one terminal.
         """
         if self._coords is not None:
             return self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
         self._coords, self._terminal_indices, self._source_idx, self._names, self._costs = self.parse_input(
-            self.request, debug=self.request.debug)
+            self.request, poles=poles, debug=self.request.debug)
 
         # You can add more validation / normalization here if desired
         if len(self._coords) < 2:

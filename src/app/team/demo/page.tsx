@@ -847,7 +847,7 @@ export default function DemoPage() {
     console.log('Sending request to:', backendUrl);
 
     const startTime = performance.now();
-    const debug = true;
+    const debug = 0;
 
     try {
       // ────────────────────────────────────────────────
@@ -872,7 +872,7 @@ export default function DemoPage() {
             lowVoltageCostPerMeter: lowVoltageCost || 0,
             highVoltageCostPerMeter: highVoltageCost || 0,
           },
-          debug: false,
+          debug: debug,
         }),
       });
 

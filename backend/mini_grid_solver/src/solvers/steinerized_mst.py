@@ -71,7 +71,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
             SolverResult with nodes, edges, metrics, and optional debug info.
         """
         # ─── 1. Parse input once and cache results ──────────────────────────────
-        coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         # ─── 2. Compute full distance matrix using vectorized haversine ─────────
         # This avoids O(n²) scalar calls and is much faster for moderate n
@@ -108,18 +108,6 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
             point_to_node_idx[key] = idx
             node_counter += 1
             return idx
-
-        # ─── 5. Add original source and terminal nodes first ────────────────────
-        add_node(
-            coords[source_idx, 0], coords[source_idx, 1],
-            names[source_idx], "source"
-        )
-
-        for t_idx in terminal_indices:
-            add_node(
-                coords[t_idx, 0], coords[t_idx, 1],
-                names[t_idx], "terminal"
-            )
 
         # ─── 6. Process each MST edge: steinerize if necessary ──────────────────
         for i, j, orig_dist in mst_edges:

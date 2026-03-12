@@ -28,106 +28,48 @@ class SimpleMSTSolver(BaseMiniGridSolver):
 
     def solve(self) -> SolverResult:
         # 1. Parse input
-        coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         n = len(coords)
         if n < 2:
             raise ValueError("Need at least source + 1 terminal")
 
-        # 2. Create nodes (only originals — no candidates)
-        nodes: List[Node] = []
-        for i in range(n):
-            node_type: Literal["source", "terminal", "pole"] = "source" if i == source_idx else "terminal"
-            name = names[i] if i < len(names) else f"Point {i + 1}"
-            nodes.append(Node(
-                index=i,
-                lat=float(coords[i, 0]),
-                lng=float(coords[i, 1]),
-                type=node_type,
-                name=name,
-                is_candidate=False,
-                used=True,  # all originals are used
-            ))
-
         # 3. Compute full distance matrix
         dist_matrix = self.compute_distance_matrix(coords)
 
-        # 4. Build complete undirected graph with distances as weights
-        G = nx.complete_graph(n)
-        for i in range(n):
-            for j in range(i + 1, n):
-                d = dist_matrix[i, j]
-                weight = d * costs["lowVoltageCostPerMeter"]
-                G.edges[i, j]["weight"] = weight
-                G.edges[i, j]["length"] = d
+        pole_indices = [n.index for n in nodes if n.type == "pole"]
 
-        # 5. Compute MST (Kruskal or Prim — NetworkX uses Kruskal by default)
-        mst_undirected = nx.minimum_spanning_tree(G, algorithm="kruskal", weight="weight")
+        if len(pole_indices) > 0:
 
-        # 6. Orient the tree away from the source (make it a rooted tree / arborescence)
-        #    We do a BFS from source and direct edges outward
-        mst_directed = nx.DiGraph()
-        visited = set()
-        queue = [source_idx]
+            DG = self.build_directed_graph_for_arborescence(
+                source_idx, terminal_indices, pole_indices, dist_matrix, costs,
+                max_pole_to_pole_lv=30,
+                max_pole_to_terminal_lv=30
 
-        while queue:
-            u = queue.pop(0)
-            if u in visited:
-                continue
-            visited.add(u)
+            )
 
-            for v in mst_undirected.neighbors(u):
-                if v not in visited:
-                    # Direct edge u → v (away from source)
-                    length = mst_undirected.edges[u, v]["length"]
-                    weight = mst_undirected.edges[u, v]["weight"]
-                    mst_directed.add_edge(
-                        u, v,
-                        weight=weight,
-                        length=length,
-                        voltage="low"  # everything low for this simple version
-                    )
-                    queue.append(v)
+            arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
+            mst = self.prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)
 
-        # 7. All nodes are used (since it's a spanning tree)
-        used_nodes = nodes  # reference — all are included
+            # 7. All nodes are used (since it's a spanning tree)
+            used_nodes = self.extract_used_nodes(mst, nodes)
+        else:
+            G = nx.complete_graph(n)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    d = dist_matrix[i, j]
+                    weight = d * costs["lowVoltageCostPerMeter"]
+                    G.edges[i, j]["weight"] = weight
+                    G.edges[i, j]["length"] = d
+            mst = nx.minimum_spanning_tree(G)
+            used_nodes = nodes
 
-        # 8. Build output edges
-        edges: List[OutputEdge] = []
-        total_low_m = 0.0
-        total_high_m = 0.0
 
-        for u, v, data in mst_directed.edges(data=True):
-            length_m = data.get("length", 0.0)
-            voltage = data.get("voltage", "low")
-
-            start_node = nodes[u]
-            end_node = nodes[v]
-
-            edges.append(OutputEdge(
-                start={
-                    "lat": start_node.lat,
-                    "lng": start_node.lng,
-                    "name": start_node.name,
-                    "type": start_node.type,
-                },
-                end={
-                    "lat": end_node.lat,
-                    "lng": end_node.lng,
-                    "name": end_node.name,
-                    "type": end_node.type,
-                },
-                lengthMeters=round(length_m, 2),
-                voltage=voltage,
-            ))
-
-            if voltage == "low":
-                total_low_m += length_m
-            elif voltage == "high":
-                total_high_m += length_m
+        # 8. Compute total lengths and assign voltage levels (all low for now)
+        edges, total_low_m, total_high_m = self._build_edges_and_lengths(mst, used_nodes)
 
         # 9. No extra poles used
-        num_poles = 0
+        num_poles = len(pole_indices)
 
         # 10. Build result using helper
         debug_info = None

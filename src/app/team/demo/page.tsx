@@ -146,6 +146,10 @@ export default function DemoPage() {
   const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
   const [miniGridEdges, setMiniGridEdges] = useState<MiniGridEdge[]>([]);
   const [miniGridNodes, setMiniGridNodes] = useState<MiniGridNode[]>([]);
+  const [originalDataPoints, setOriginalDataPoints] = useState<LocationPoint[]>(
+    []
+  );
+  const [originalFileName, setOriginalFileName] = useState<string | null>(null);
   const [computingMiniGrid, setComputingMiniGrid] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -529,7 +533,7 @@ export default function DemoPage() {
 
       // ── Type from description ──────────────────────────────
       const descEl = placemark.getElementsByTagName('description')[0];
-      let pointType: 'source' | 'terminal' = 'terminal'; // default
+      let pointType: 'source' | 'terminal' | 'pole' = 'terminal'; // default
 
       if (descEl) {
         const descText = descEl.textContent?.trim() || '';
@@ -537,12 +541,16 @@ export default function DemoPage() {
         // Look for patterns like: "Type: source", "type:source", "source", etc.
         const typeMatch =
           descText.match(/type\s*[:=]\s*(\w+)/i) ||
-          descText.match(/\b(source|terminal)\b/i);
+          descText.match(/\b(source|terminal|pole)\b/i);
 
         if (typeMatch) {
           const candidate = typeMatch[1]?.toLowerCase();
-          if (candidate === 'source' || candidate === 'terminal') {
-            pointType = candidate as 'source' | 'terminal';
+          if (
+            candidate === 'source' ||
+            candidate === 'terminal' ||
+            candidate === 'pole'
+          ) {
+            pointType = candidate as 'source' | 'terminal' | 'pole';
           }
         }
       }
@@ -577,6 +585,8 @@ export default function DemoPage() {
       });
     });
 
+    console.log('Parsed KML:', points);
+
     return points;
   };
 
@@ -590,12 +600,14 @@ export default function DemoPage() {
 
   const processFile = (file: File) => {
     setMiniGridEdges([]);
+    setOriginalDataPoints([]);
     setMiniGridNodes([]);
     setCostBreakdown(null);
     setCalcError(null);
     setError(null);
     setDataPoints([]);
     setFileName(file.name);
+    setOriginalFileName(file.name);
     setLoading(true);
 
     const lowerName = file.name.toLowerCase();
@@ -613,6 +625,7 @@ export default function DemoPage() {
             setDataPoints([]);
           } else {
             setDataPoints(parsedPoints);
+            setOriginalDataPoints(parsedPoints);
           }
         } catch (err) {
           setError('Error parsing KML file.');
@@ -664,6 +677,7 @@ export default function DemoPage() {
               setDataPoints([]);
             } else {
               setDataPoints(parsedPoints);
+              setOriginalDataPoints(parsedPoints);
             }
           } catch (err) {
             setError('Error parsing CSV file.');
@@ -779,6 +793,41 @@ export default function DemoPage() {
     }
   };
 
+  const handleResetMap = () => {
+    // Clear map visuals
+    markersRef.current.forEach((marker) => {
+      marker.map = null;
+    });
+    markersRef.current = [];
+
+    polylinesRef.current.forEach((line) => {
+      line.setMap(null);
+    });
+    polylinesRef.current = [];
+
+    // Reset state
+    setDataPoints(originalDataPoints); // if you're using the originalPoints state
+    setMiniGridNodes([]);
+    setMiniGridEdges([]);
+    setCostBreakdown(null);
+    setCalcError(null);
+    setError(null);
+    setFileName(originalFileName);
+    setComputingMiniGrid(false);
+
+    // Optional: reset map view to a default area
+    if (map) {
+      map.setCenter({ lat: 39.8283, lng: -98.5795 }); // US center
+      map.setZoom(4);
+
+      // Or reset to your test data area, e.g.:
+      // map.setCenter({ lat: 33.777, lng: -84.396 });
+      // map.setZoom(14);
+    }
+
+    console.log('Map and data reset');
+  };
+
   const handleRunSolver = async () => {
     if (dataPoints.length < 2) {
       alert('Need at least 2 points to run optimization.');
@@ -802,38 +851,10 @@ export default function DemoPage() {
 
     try {
       // ────────────────────────────────────────────────
-      // Only send ORIGINAL points (source + terminals)
-      // Filter out anything that is a 'pole'
+      // Only send ORIGINAL points
       // ────────────────────────────────────────────────
-      const originalPoints = markersRef.current
-        .map((marker) => {
-          const pos = toLiteral(marker.position);
-          if (!pos) return null;
 
-          // Extract type from title or from custom property if you added one
-          const title = marker.title || '';
-          const isPole = title.toLowerCase().includes('pole');
-
-          // You can also check marker.content if you want to be more robust
-          return {
-            lat: pos.lat,
-            lng: pos.lng,
-            name: marker.title ?? null,
-            type: isPole ? 'pole' : 'terminal', // fallback
-          };
-        })
-        .filter(
-          (p): p is { lat: number; lng: number; name: string; type: string } =>
-            p !== null
-        )
-        .filter((p) => p.type !== 'pole') // ← the important line
-        .map((p) => ({
-          lat: p.lat,
-          lng: p.lng,
-          name: p.name,
-        }));
-
-      if (originalPoints.length < 2) {
+      if (originalDataPoints.length < 2) {
         alert('No valid source/terminal points found to optimize.');
         setComputingMiniGrid(false);
         return;
@@ -845,7 +866,7 @@ export default function DemoPage() {
         body: JSON.stringify({
           solver: selectedSolver,
           params: {},
-          points: originalPoints,
+          points: originalDataPoints,
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,
@@ -1740,6 +1761,31 @@ export default function DemoPage() {
                 className='h-[55vh] w-full rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl sm:h-[65vh] lg:h-[75vh]'
               >
                 Loading satellite map…
+              </div>
+              {/* Reset Button */}
+              <div className='flex justify-center sm:justify-end'>
+                <button
+                  onClick={handleResetMap}
+                  disabled={
+                    dataPoints.length === 0 && miniGridNodes.length === 0
+                  } // optional: disable when already empty
+                  className={`flex items-center gap-2 rounded-lg bg-red-600/80 px-6 py-2.5 text-sm font-medium text-white shadow-md shadow-red-950/40 transition-all hover:bg-red-700 hover:shadow-red-900/30 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <svg
+                    className='h-4 w-4'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth={2}
+                      d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
+                    />
+                  </svg>
+                  Reset Map
+                </button>
               </div>
             </div>
           </div>

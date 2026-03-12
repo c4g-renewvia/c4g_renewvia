@@ -90,82 +90,6 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             plt.show()
             plt.close(fig)
 
-    def build_directed_graph_for_arborescence(
-            self,
-            source_idx,
-            terminal_indices,
-            pole_indices,
-            dist_matrix,
-            costs,
-    ) -> nx.DiGraph:
-        """
-        Builds a directed graph for use in finding a minimum-cost arborescence given
-        a set of coordinates, indices, and constraints.
-
-        This function constructs a directed graph where poles and terminals are represented
-        as nodes, and edges represent potential connections between them. Different weight
-        and voltage attributes are applied to the edges depending on their type (pole-to-terminal,
-        pole-to-pole, or source-to-pole/terminal connections).
-
-        Args:
-            source_idx: Integer index representing the source node (e.g., a substation).
-            terminal_indices: List of integers representing indices of all terminals.
-            pole_indices: List of integers representing indices of all poles.
-            dist_matrix: 2D matrix where each element represents the distance between nodes.
-            costs: Dictionary storing cost values for graph construction. Specifically,
-                   it should include the `"poleCost"` key to determine the cost addition
-                   for pole-to-pole connections.
-
-        Returns:
-            nx.DiGraph: A directed graph with the defined nodes and edges.
-
-        """
-
-        pole_cost = float(costs.get("poleCost", 100.0))
-        low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 10.0))
-        high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 20.0))
-
-        DG = nx.DiGraph()
-
-        # 1: source → poles (main trunk)
-        for p in pole_indices:
-            d = dist_matrix[source_idx, p]
-            if 0.1 < d:
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
-                w += extra_poles_needed * pole_cost
-
-                DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
-
-        # 2: Bidirectional pole ↔ pole (undirected spans)
-        for i in range(len(pole_indices)):
-            for j in range(i + 1, len(pole_indices)):
-                p1, p2 = pole_indices[i], pole_indices[j]
-                d = dist_matrix[p1, p2]
-
-                # cost of wire and pole
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
-                w += extra_poles_needed * pole_cost
-
-                if 0.1 < d:
-                    DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
-
-        # 3: poles → terminals (service drops)
-        for p in pole_indices:
-            for h in terminal_indices:
-                d = dist_matrix[p, h]
-                if 0.1 < d:
-                    # cost of wire
-                    w = d * low_voltage_cost_per_meter
-
-                    extra_poles_needed = int(d // MAX_POLE_TO_POLE_LV)
-                    w += extra_poles_needed * pole_cost
-
-                    DG.add_edge(p, h, weight=w, length=d, voltage="low")
-
-        return DG
-
     def generate_cluster_center_candidates(self, coords, min_clusters=2, max_clusters=15, n_init=10):
         """
         Generate candidate pole locations as centers of K-Means clusters.
@@ -385,7 +309,7 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
             - Debugging tools and plotting utilities are conditionally executed, based on the provided
               debug configuration.
         """
-        coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
+        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input()
 
         # We'll keep coords as list for easier appending
         current_coords = list(coords)  # list of [lat, lng] or [lng, lat] – adjust indexing accordingly
@@ -438,7 +362,9 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                 pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
                 DG = self.build_directed_graph_for_arborescence(
-                    source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs
+                    source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs,
+                    max_pole_to_pole_lv=MAX_POLE_TO_POLE_LV,
+                    max_pole_to_terminal_lv=MAX_POLE_TO_POLE_LV
                 )
 
                 arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
@@ -531,7 +457,10 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
 
             # Build graph and compute MST
             DG = self.build_directed_graph_for_arborescence(
-                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs
+                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs,
+                max_pole_to_pole_lv=MAX_POLE_TO_POLE_LV,
+                max_pole_to_terminal_lv=MAX_POLE_TO_POLE_LV
+
             )
 
             arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
@@ -585,8 +514,6 @@ class IteratedOneSteinerSolver(CandidateMSTSolver):
                 best_pruned_mst,
                 title="Best Final Plot",
             )
-
-
 
         debug = {
             "method": "classic_mst_fermat",

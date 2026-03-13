@@ -2,4 +2,4 @@ from .voronoi_mst_solver import VoronoiMSTSolver
 from .fermat_mst_solver import FermatMSTSolver
 from .mst_solver import SimpleMSTSolver
 from .steinerized_mst import SteinerizedMSTSolver
-from .iterated_1_steiner_solver import IteratedOneSteinerSolver
+from .greedy_n_steiner_solver import GreedyNSteinerSolver

@@ -3,8 +3,10 @@ import math
 from abc import ABC, abstractmethod
 from typing import Tuple
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+from matplotlib import collections as mc
 
 from ..utils.models import *
 
@@ -34,6 +36,10 @@ class BaseMiniGridSolver(ABC):
         self._costs: Optional[Dict[str, float]] = None
 
     # ─── Static Helper methods ───────────────────────────────────────────────
+    @staticmethod
+    def get_input_params():
+        return []
+
     @staticmethod
     def compute_bounding_box(coords):
         """
@@ -115,7 +121,7 @@ class BaseMiniGridSolver(ABC):
         return 6371000 * c  # shape (n_candidates, n_buildings)
 
     @staticmethod
-    def parse_input(request: SolverRequest, poles: bool = True, debug: bool = False):
+    def parse_input(request: SolverRequest, poles: bool = True, debug: int = 0):
         """
         Parses input request containing information about geographical points, costs, and their attributes to generate structured
         data suitable for optimization tasks.
@@ -176,8 +182,6 @@ class BaseMiniGridSolver(ABC):
 
             coords_list.append([lat, lng])
 
-
-
             # Source detection (case-insensitive, more flexible)
             name_lower = name.lower()
             if any(kw in name_lower for kw in SOURCE_KEYWORDS) or "source" in name_lower:
@@ -199,6 +203,73 @@ class BaseMiniGridSolver(ABC):
 
         return coords, terminal_indices, source_idx, names, costs
 
+    @staticmethod
+    def _plot_current_tree(
+            nodes_list,  # List[Node]
+            mst_or_arbo,  # nx.Graph / nx.DiGraph
+            added_points=None,  # optional: the newly added candidate coord (tuple/list)
+            title="Current tree after candidate addition",
+            filename=None  # if given → save to file instead of show
+    ):
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_title(title)
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+        ax.set_aspect('equal')
+
+        # 1. Safely map indices to their true coordinates
+        coord_dict = {n.index: n.coord_tuple for n in nodes_list}
+
+        # 2. Extract specific coordinates by type
+        source_coords = [n.coord_tuple for n in nodes_list if n.type == "source"]
+        term_coords = [n.coord_tuple for n in nodes_list if n.type == "terminal"]
+        pole_coords = [n.coord_tuple for n in nodes_list if n.type == "pole"]
+
+        # Plot Source
+        if source_coords:
+            sc = np.array(source_coords)
+            ax.scatter(sc[:, 1], sc[:, 0], c='blue', s=120, marker='s', label='Source')
+
+        # Plot Terminals
+        if term_coords:
+            tc = np.array(term_coords)
+            ax.scatter(tc[:, 1], tc[:, 0], c='red', s=80, marker='o', label='Terminals')
+
+        # Plot Existing poles
+        if pole_coords:
+            pc = np.array(pole_coords)
+            ax.scatter(pc[:, 1], pc[:, 0], c='black', s=60, marker='^', label='Poles')
+
+        # Highlight newly added candidate
+        if added_points is not None:
+            added_points = np.array(added_points)
+            ax.scatter(added_points[:, 1], added_points[:, 0], c='orange', s=200, marker='*', edgecolor='black', linewidth=1.5,
+                       label='Newly added pole')
+
+        # Plot edges
+        edge_lines = []
+        for u, v in mst_or_arbo.edges():
+            # Safely look up the exact coordinate using the node's unique index
+            if u in coord_dict and v in coord_dict:
+                pt_u = [coord_dict[u][1], coord_dict[u][0]]  # [lng, lat]
+                pt_v = [coord_dict[v][1], coord_dict[v][0]]
+                edge_lines.append([pt_u, pt_v])
+
+        if edge_lines:
+            lc = mc.LineCollection(edge_lines, colors='green', linewidths=1.5, alpha=0.7)
+            ax.add_collection(lc)
+
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+        if filename:
+            plt.savefig(filename, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Saved plot: {filename}")
+        else:
+            plt.show()
+            plt.close(fig)
+
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
@@ -217,7 +288,7 @@ class BaseMiniGridSolver(ABC):
 
         for i in range(n_orig):
             if i == source_idx:
-                t = "source"
+                t: Literal['source', 'pole', 'terminal'] = "source"
             else:
                 if "pole" in names[i].lower():
                     t = "pole"
@@ -246,7 +317,8 @@ class BaseMiniGridSolver(ABC):
 
         return nodes
 
-    def parse_and_validate_input(self, poles: bool = True) -> Tuple[list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
+    def parse_and_validate_input(self, poles: bool = True) -> Tuple[
+        list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
         """
         Parses and validates the input data for constructing nodes. This includes parsing input data
         such as coordinates, source index, terminal indices, names, and costs, as well as ensuring

@@ -90,41 +90,50 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         points.append((lat2, lon2))
         return points
 
-    def generate_collinear_candidates(self, coords, current_tree_edges, max_length=30.0, num_per_edge=3):
+    def generate_collinear_candidates(
+            self,
+            coords,  # usually np.ndarray (n, 2)
+            current_tree_edges,
+            max_length: float = 30.0,
+            num_per_edge: int = 3
+    ) -> np.ndarray:
         """
-        Generates a list of candidate points that are collinear to specified tree edges.
-        Each candidate is identified based on the coordinates of the original points and
-        computed intermediate points. This function is typically used to refine or enhance
-        a point set along edges that exceed a specified length threshold.
-
-        Args:
-            coords: A list of coordinates. values are tuples of coordinates (latitude, longitude)
-                representing the positions of the nodes.
-            current_tree_edges: A list of edges defining the current
-                tree. Each edge is represented as a tuple of two node indices.
-            max_length (float, optional): The maximum length of an edge segment in meters.
-                If an edge exceeds this length, intermediate points are calculated.
-                Defaults to 30.0.
-            num_per_edge (int, optional): The approximate number of points to add per
-                segment along an edge if it is split. Determines the spacing between the
-                intermediate points. Defaults to 3.
-
-        Returns:
-            numpy.ndarray: An array of unique candidate points, where each point is
-                represented as a pair of latitude and longitude coordinates.
-
+        Generate ~num_per_edge intermediate candidates per long edge.
         """
         candidates = []
-        for u, v in current_tree_edges:  # assume edges from arbo/pruned
-            p1 = coords[u]
+
+        for u, v in current_tree_edges:
+            p1 = coords[u]  # [lat, lon]
             p2 = coords[v]
             d = self.haversine_meters(p1[0], p1[1], p2[0], p2[1])
-            if d > max_length:
-                # Use your _great_circle_intermediates or similar
-                intermediates = self._great_circle_intermediates(p1[0], p1[1], p2[0], p2[1], max_length / num_per_edge)
-                for inter in intermediates[1:-1]:  # skip endpoints
-                    candidates.append(np.array(inter))
-        return np.unique(np.array(candidates), axis=0)  # dedup
+
+            if d <= max_length:
+                continue
+
+            # We want ~ num_per_edge intermediate points
+            # → number of segments = num_per_edge + 1
+            n_segments_desired = num_per_edge + 1
+            segment_length = d / n_segments_desired
+
+            # But never make segments shorter than, say, 5–10 m
+            # segment_length = max(segment_length, 8.0)  # adjust as needed
+
+            intermediates = self._great_circle_intermediates(
+                p1[0], p1[1],
+                p2[0], p2[1],
+                max_length=segment_length  # ← this is the key fix
+            )
+
+            # intermediates includes start + end → take only the middle ones
+            for pt in intermediates[1:-1]:
+                candidates.append(np.array(pt))
+
+        if not candidates:
+            return np.empty((0, 2), dtype=float)
+
+        candidates_array = np.array(candidates)
+        # Remove near-duplicates (floating point)
+        return np.unique(np.round(candidates_array, decimals=6), axis=0)
 
     def split_long_edges_with_coords(
             self,

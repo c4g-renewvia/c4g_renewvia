@@ -19,6 +19,11 @@ class SolverRequest(BaseModel):
     debug: int = 0
 
 
+class Solver(BaseModel):
+    name: str
+    params: list[dict[str, Any]] = []
+
+
 class Node(BaseModel):
     """
     Unified representation of any point in the network:

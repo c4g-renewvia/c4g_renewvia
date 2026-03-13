@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY  # or wherever
-from mini_grid_solver.src.utils.models import SolverRequest
+from mini_grid_solver.src.utils.models import SolverRequest, Solver
 
 logger = logging.getLogger(__name__)
 
@@ -49,4 +49,9 @@ async def get_solvers() -> dict:
     if len(SOLVER_REGISTRY) == 0 or SOLVER_REGISTRY is None:
         raise HTTPException(status_code=500, detail="No solvers available")
 
-    return {"solvers": list(SOLVER_REGISTRY.keys())}
+    solvers = {"solvers": []}
+    for solver_name, solver_class in SOLVER_REGISTRY.items():
+        params = solver_class.get_input_params()
+        solvers['solvers'].append(Solver(name = str(solver_name), params = params))
+
+    return solvers

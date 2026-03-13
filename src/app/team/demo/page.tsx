@@ -116,6 +116,20 @@ interface MiniGridNode {
   type: 'source' | 'terminal' | 'pole';
 }
 
+interface Solvers {
+  name: string;
+  params: SolverParam[];
+}
+
+interface SolverParam {
+  name: string;
+  type?: 'integer' | 'float' | 'number'; // you can expand later
+  default: number;
+  min?: number;
+  max?: number;
+  description: string;
+}
+
 interface CostBreakdown {
   lowVoltageMeters: number;
   highVoltageMeters: number;
@@ -169,9 +183,12 @@ export default function DemoPage() {
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const [solvers, setSolvers] = useState<string[]>([]);
-  const [selectedSolver, setSelectedSolver] =
-    useState<string>('SimpleMSTSolver');
+  const [solvers, setSolvers] = useState<Solvers[]>([]);
+  const [selectedSolverName, setSelectedSolverName] = useState<string>('');
+
+  const selectedSolver = solvers.find((s) => s.name === selectedSolverName);
+
+  const [paramValues, setParamValues] = useState<Record<string, number>>({});
 
   const [manualPoint, setManualPoint] = useState({
     name: '',
@@ -412,6 +429,32 @@ export default function DemoPage() {
       .then((res) => res.json())
       .then((data) => setSolvers(data.solvers));
   }, []);
+
+  useEffect(() => {
+    if (!selectedSolver) {
+      setParamValues({});
+      return;
+    }
+
+    console.log('selectedSolver', selectedSolver);
+
+    const initialValues: Record<string, number> = {};
+    selectedSolver.params.forEach((p) => {
+      initialValues[p.name] = p.default;
+    });
+
+    setParamValues(initialValues);
+  }, [selectedSolverName]);
+
+  const updateParam = (paramName: string, value: string) => {
+    const numValue = Number(value);
+    if (isNaN(numValue)) return;
+
+    setParamValues((prev) => ({
+      ...prev,
+      [paramName]: numValue,
+    }));
+  };
 
   // Add markers and fit bounds whenever dataPoints or map changes
   // Solved Markers useEffect – single unified logic
@@ -864,8 +907,8 @@ export default function DemoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          solver: selectedSolver,
-          params: {},
+          solver: selectedSolverName,
+          params: paramValues,
           points: originalDataPoints,
           costs: {
             poleCost: poleCost || 0,
@@ -1875,8 +1918,8 @@ export default function DemoPage() {
                   <select
                     id='solver-select'
                     name='solver'
-                    value={selectedSolver} // ← assume you have state for this
-                    onChange={(e) => setSelectedSolver(e.target.value)}
+                    value={selectedSolverName} // ← assume you have state for this
+                    onChange={(e) => setSelectedSolverName(e.target.value)}
                     className={`/* extra right padding for arrow */ w-full cursor-pointer appearance-none rounded-lg border border-zinc-700/70 bg-zinc-800/60 px-4 py-3 pr-10 text-base font-medium text-zinc-100 shadow-inner shadow-black/30 transition-all duration-200 hover:border-zinc-600/80 hover:bg-zinc-800/80 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/50 focus:outline-none`}
                   >
                     <option value='' disabled className='text-zinc-500'>
@@ -1884,11 +1927,11 @@ export default function DemoPage() {
                     </option>
                     {solvers.map((s) => (
                       <option
-                        key={s}
-                        value={s}
+                        key={s.name}
+                        value={s.name}
                         className='bg-zinc-900 text-zinc-100'
                       >
-                        {s}
+                        {s.name}
                       </option>
                     ))}
                   </select>
@@ -1909,6 +1952,50 @@ export default function DemoPage() {
                       />
                     </svg>
                   </div>
+
+                  {/* ── Dynamic parameter inputs ── */}
+                  {selectedSolver && selectedSolver.params.length > 0 && (
+                    <div className='space-y-5 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-5'>
+                      <h3 className='text-lg font-medium text-zinc-200'>
+                        {selectedSolver.name} Parameters
+                      </h3>
+
+                      <div className='grid gap-5 sm:grid-cols-2'>
+                        {selectedSolver.params.map((param) => (
+                          <div key={param.name} className='space-y-1.5'>
+                            <label
+                              htmlFor={`param-${param.name}`}
+                              className='block text-sm font-medium text-zinc-300'
+                            >
+                              {param.name}
+                              <span className='ml-1.5 text-xs text-zinc-500'>
+                                (default: {param.default})
+                              </span>
+                            </label>
+
+                            <input
+                              id={`param-${param.name}`}
+                              type='number'
+                              min={param.min}
+                              max={param.max}
+                              step={param.type === 'integer' ? 1 : 0.01}
+                              value={paramValues[param.name] ?? ''}
+                              onChange={(e) =>
+                                updateParam(param.name, e.target.value)
+                              }
+                              className='w-full rounded-md border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-zinc-100 placeholder-zinc-500 shadow-inner focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 focus:outline-none'
+                            />
+
+                            {param.description && (
+                              <p className='mt-1 text-xs leading-relaxed text-zinc-500'>
+                                {param.description}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

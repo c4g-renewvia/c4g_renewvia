@@ -3,7 +3,7 @@ from .registry import register_solver
 
 
 @register_solver
-class FermatMSTSolver(CandidateMSTSolver):
+class StaticFermatMSTSolver(CandidateMSTSolver):
 
     def __init__(self, request: SolverRequest):
         request.params['candidate_algorithm'] =  'fermat'

@@ -1,5 +1,5 @@
-from .voronoi_mst_solver import VoronoiMSTSolver
-from .fermat_mst_solver import FermatMSTSolver
+from .voronoi_mst_solver import StaticVoronoiMSTSolver
+from .fermat_mst_solver import StaticFermatMSTSolver
 from .mst_solver import SimpleMSTSolver
 from .steinerized_mst import SteinerizedMSTSolver
 from .greedy_n_steiner_solver import GreedyNSteinerSolver

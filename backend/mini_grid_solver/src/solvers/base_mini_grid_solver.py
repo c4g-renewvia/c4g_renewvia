@@ -535,9 +535,9 @@ class BaseMiniGridSolver(ABC):
         Helper to construct a valid SolverResult from the most common pieces.
         Many simple algorithms can just produce edges + used nodes and call this.
         """
-        pole_cost = self._costs.get("poleCost", 1500.0)
-        low_cost_m = self._costs.get("lowVoltageCostPerMeter", 8.0)
-        high_cost_m = self._costs.get("highVoltageCostPerMeter", 25.0)
+        pole_cost = self._costs.get("poleCost", 100.0)
+        low_cost_m = self._costs.get("lowVoltageCostPerMeter", 10.0)
+        high_cost_m = self._costs.get("highVoltageCostPerMeter", 20.0)
 
         low_wire_cost = total_low_m * low_cost_m
         high_wire_cost = total_high_m * high_cost_m

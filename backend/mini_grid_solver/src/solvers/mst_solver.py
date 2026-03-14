@@ -61,7 +61,8 @@ class SimpleMSTSolver(BaseMiniGridSolver):
                     weight = d * costs["lowVoltageCostPerMeter"]
                     G.edges[i, j]["weight"] = weight
                     G.edges[i, j]["length"] = d
-            mst = nx.minimum_spanning_tree(G)
+                    G.edges[i, j]["voltage"] = "low"
+            mst = nx.minimum_spanning_tree(G, weight="weight")
             used_nodes = nodes
 
 

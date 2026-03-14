@@ -53,6 +53,7 @@ The `BaseMiniGridSolver` is an abstract base class that provides essential utili
 - **Geographical Calculations**: Implements the Haversine formula to calculate great-circle distances in meters.
 - **Input Canonicalization**: Automatically identifies power sources via keyword detection (e.g., "substation", "generator") and standardizes point names.
 - **Vectorized Math**: Uses NumPy-based `haversine_vec` to compute distance matrices efficiently.
+- **`_solve` method**: The abstract method that must be implemented by all child classes and does the main computation.
 
 ### 3. Registry Pattern (`registry.py`)
 
@@ -69,20 +70,6 @@ Solvers are decoupled from the main execution logic through a central `SOLVER_RE
 | **`StaticVoronoiMSTSolver`** | Static Voronoi Steiner Points | Generates potential pole locations using Voronoi vertices points to reduce total wire length.                               |
 | **`StaticFermatMSTSolver`**  | Static Fermat Steiner Points  | Generates potential pole locations using Fermat-Torricelli points to reduce total wire length.                              |
 | **`GreedyNSteinerSolver`**   | Greedy Iteration              | Iteratively adds candidate poles from Voronoi, Fermat, collinear, and projection sets to find the most cost-effective tree. |
-
----
-
-## Specialized Optimization Logic
-
-### Advanced Candidate Generation (`candidate_mst_solver.py`)
-
-- **Voronoi Candidates**: Identifies optimal junction points based on the geometry of building clusters.
-- **Fermat-Torricelli Points**: Specifically targets 3-point junctions to minimize the sum of distances to vertices.
-- **Building Filtering**: Includes logic to remove candidate poles that fall inside building footprints based on CSV-provided geometries.
-
-### Edge Fragmentation
-
-Solvers include logic to break long spans into segments. This ensures that every cable length in the resulting `SolverResult` respects physical limits like the `MAX_POLE_TO_POLE_LV` threshold.
 
 ---
 

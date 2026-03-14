@@ -76,7 +76,7 @@ interface MiniGridRun {
   dataPoints: LocationPoint[];
   miniGridNodes: MiniGridNode[];
   miniGridEdges: MiniGridEdge[];
-  costBreakdown?: CostBreakdown;
+  costBreakdown: CostBreakdown;
   poleCost: number;
   lowVoltageCost: number;
   highVoltageCost: number;

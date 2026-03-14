@@ -1131,7 +1131,7 @@ export default function DemoPage() {
     }
 
     if (pointsToSend.length < 2) {
-      alert('Need at least 2 points to run optimization.');
+      alert('Need at least 2 points to run solver.');
       return;
     }
 
@@ -1253,7 +1253,7 @@ export default function DemoPage() {
       });
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : 'Failed to run optimization';
+        err instanceof Error ? err.message : 'Failed to run solver';
       setCalcError(message);
       console.error('Solver error:', err);
     } finally {
@@ -1554,7 +1554,7 @@ export default function DemoPage() {
     }
 
     if (miniGridNodes.length === 0) {
-      alert('No optimization results to save yet.');
+      alert('No solver results to save yet.');
       return;
     }
 
@@ -2080,7 +2080,7 @@ export default function DemoPage() {
         {/* ── 3. COSTS + SOLVER SECTION ──────────────────────────────────────── */}
         <section className='mb-12'>
           <h2 className='mb-6 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
-            2. Costs & Optimization
+            2. Costs & Solver
           </h2>
 
           <div className='grid gap-8 lg:grid-cols-2'>
@@ -2261,7 +2261,7 @@ export default function DemoPage() {
                   }
                   className='w-full rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all hover:scale-[1.02] hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50'
                 >
-                  {computingMiniGrid ? 'Solving...' : 'Run Optimization'}
+                  {computingMiniGrid ? 'Solving...' : 'Run Solver'}
                 </button>
 
                 <p className='mt-4 text-xs text-zinc-500'>

@@ -1,4 +1,4 @@
-# Mini-Grid Optimizer Documentation
+# Mini-Grid Solver Documentation
 
 This library provides a comprehensive framework for designing and optimizing rural power distribution networks. It focuses on minimizing total project costs by balancing wire lengths and pole placements while adhering to strict geographical and physical constraints.
 
@@ -9,26 +9,27 @@ This library provides a comprehensive framework for designing and optimizing rur
 Below is the directory structure for the Mini-Grid Optimizer library based on the provided source files:
 
 ```text
-project_root/
-│
-├── src/
-│   ├── solvers/
-│   │   ├── __init__.py
-│   │   ├── base_mini_grid_solver.py    # Abstract base class for all solvers
-│   │   ├── candidate_mst_solver.py     # Base for candidate-based optimization
-│   │   ├── fermat_mst_solver.py        # Solver using Fermat-Torricelli points
-│   │   ├── iterated_1_steiner_solver.py # Iterative refinement solver
-│   │   ├── mst_solver.py               # Simple MST baseline solver
-│   │   ├── registry.py                 # Solver registration utility
-│   │   ├── steinerized_mst.py          # MST with edge fragmentation
-│   │   └── voronoi_mst_solver.py       # Solver using Voronoi vertices
-│   │
-│   └── utils/
-│       ├── __init__.py
-│       ├── models.py                   # Pydantic data models
-│       └── utils.py                    # General helper functions
-│
-└── 179_buildings.csv                   # Building footprint data for filtering
+backend/
+ └──mini_grid_solver/
+    ├── server.py                           # Main entry point for the API
+    ├── src/
+        └── solvers/
+            ├── __init__.py
+            ├── base_mini_grid_solver.py    # Abstract base class for all solvers
+            ├── candidate_mst_solver.py     # Base for candidate-based optimization
+            ├── fermat_mst_solver.py        # Solver using static Fermat-Torricelli points
+            ├── greedy_n_steiner_solver.py  # Greedy Iterative refinement solver
+            ├── mst_solver.py               # Simple MST baseline solver
+            ├── registry.py                 # Solver registration utility
+            ├── steinerized_mst.py          # MST with edge fragmentation
+            └── voronoi_mst_solver.py       # Solver using static Voronoi vertices
+        │
+        └── utils/
+            ├── __init__.py
+            ├── models.py                   # Pydantic data models
+└──test_data_sets/                          # Contains csv and KML files for testing
+└──main.py                                  # Example script for running python on test data
+
 ```
 
 ---
@@ -43,6 +44,7 @@ Built on Pydantic, these models ensure type safety and structured communication:
 - **`Node`**: A unified representation of every point in the network, categorized as a `source`, `terminal`, or `pole`.
 - **`OutputEdge`**: Represents a connection between two nodes, including metadata for length and voltage levels.
 - **`SolverResult`**: The final output containing the network topology, total costs, and optional debug metrics.
+- **`Solvers`**: A registry of available optimization strategies made availiable to the front end.
 
 ### 2. Base Solver (`base_mini_grid_solver.py`)
 
@@ -60,13 +62,13 @@ Solvers are decoupled from the main execution logic through a central `SOLVER_RE
 
 ## Available Solvers
 
-| Solver                         | Strategy                      | Key Features                                                                                                    |
-| :----------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------------------------- |
-| **`SimpleMSTSolver`**          | Baseline MST                  | Computes a standard Minimum Spanning Tree using only original points; useful as a lower-bound reference.        |
-| **`SteinerizedMSTSolver`**     | MST + Fragmentation           | Builds an MST and inserts intermediate poles along any edge exceeding a maximum span (e.g., 30m).               |
-| **`VoronoiMSTSolver`**         | Static Voronoi Steiner Points | Generates potential pole locations using Voronoi vertices points to reduce total wire length.                   |
-| **`FermatMSTSolver`**          | Static Fermat Steiner Points  | Generates potential pole locations using Fermat-Torricelli points to reduce total wire length.                  |
-| **`IteratedOneSteinerSolver`** | Greedy Iteration              | Iteratively adds candidate poles from Voronoi, Fermat, and collinear sets to find the most cost-effective tree. |
+| Solver                       | Strategy                      | Key Features                                                                                                                |
+| :--------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------------------------------------- |
+| **`SimpleMSTSolver`**        | Baseline MST                  | Computes a standard Minimum Spanning Tree using only original points; useful as a lower-bound reference.                    |
+| **`SteinerizedMSTSolver`**   | MST + Fragmentation           | Builds an MST and inserts intermediate poles along any edge exceeding a maximum span (e.g., 30m).                           |
+| **`StaticVoronoiMSTSolver`** | Static Voronoi Steiner Points | Generates potential pole locations using Voronoi vertices points to reduce total wire length.                               |
+| **`StaticFermatMSTSolver`**  | Static Fermat Steiner Points  | Generates potential pole locations using Fermat-Torricelli points to reduce total wire length.                              |
+| **`GreedyNSteinerSolver`**   | Greedy Iteration              | Iteratively adds candidate poles from Voronoi, Fermat, collinear, and projection sets to find the most cost-effective tree. |
 
 ---
 
@@ -83,6 +85,10 @@ Solvers are decoupled from the main execution logic through a central `SOLVER_RE
 Solvers include logic to break long spans into segments. This ensures that every cable length in the resulting `SolverResult` respects physical limits like the `MAX_POLE_TO_POLE_LV` threshold.
 
 ---
+
+---
+
+# Future Development
 
 ## Voltage Support & Expansion
 
@@ -110,33 +116,23 @@ The architecture is designed to be "HV-ready" and can be expanded using the foll
   - New node types can be added to the `Node` model to represent transformers where the network transitions from high to low voltage.
   -
 
+### Expand Scope of Approximate Solvers:
+
+Potential future improvements include:
+
+- Genetic algorithms for global optimization.
+- Local search techniques
+- Zelikovsky-style relative greedy
+- Concatenation heuristics (Zachariasen & Winter, 1999)
+- Arora's PTAS
+- Mitchell's guillotine subdivisions
+- Ant Colony Optimization / Particle Swarms
+- Neural-guided Steiner tree
+
 ---
 
-## Getting Started
+## Getting started
 
-### Basic Implementation
-
-To run a basic optimization, define your request and initialize a registered solver:
-
-```python
-from src.utils.models import SolverRequest
-from src.solvers.steinerized_mst import SteinerizedMSTSolver
-
-# Define request with lat/lng points and costs
-request = SolverRequest(
-    points=[
-        {"lat": -1.286389, "lng": 36.817223, "Name": "Power Source", "Type": 'source},
-        {"lat": -1.285556, "lng": 36.818056, "Name": "Building A", "Type": "terminal"}
-    ],
-    costs={
-        "poleCost": 100.0,
-        "lowVoltageCostPerMeter": 10.0,
-        "highVoltageCostPerMeter": 20.0
-    }
-)
-
-# Solve and retrieve metrics
-solver = SteinerizedMSTSolver(request)
-result = solver.solve()
-print(f"Poles used: {result.numPolesUsed}")
-```
+- Create a new class that inherits from `BaseMiniGridSolver`
+- Implement the abstract methods
+- Register your solver using the `@register_solver` decorator

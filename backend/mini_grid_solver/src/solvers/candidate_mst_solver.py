@@ -486,10 +486,14 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return filtered
 
-    def solve(self) -> SolverResult:
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
         """
         Solves the problem by processing candidate points, building a graph, and computing a
         minimum spanning arborescence (MST) before postprocessing the result.
+
+        Args:
+            input_tuple: A tuple containing the parsed input data
+
 
         Returns:
             SolverResult: The result containing details such as edges, node information,
@@ -498,7 +502,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         Raises:
             ValueError: If an unsupported candidate algorithm is specified.
         """
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=False)
+        nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
         # 1. Candidates
         if self.candidate_algorithm == 'voronoi':
@@ -539,36 +543,4 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             min_segment_length=5.0,
         )
 
-        # 6. Mark used & name poles
-        used_indices = set(mst.nodes())
-        pole_counter = 1
-        used_nodes = []
-        for node in nodes:
-            if node.index in used_indices:
-                node.used = True
-                if node.type == "pole" and not node.name:
-                    node.name = f"Pole {pole_counter}"
-                    pole_counter += 1
-                used_nodes.append(node)
-
-        # 7. Build edges + lengths
-        edges, total_low, total_high = self._build_edges_and_lengths(mst, nodes)
-
-        # 8. Result
-        num_poles = sum(1 for n in used_nodes if n.type == "pole")
-
-        debug = {
-            "method": "classic_mst_fermat",
-            "candidates_generated": len(candidates),
-            "candidates_used": num_poles,
-            "original_points": len(coords),
-        } if self.request.debug else None
-
-        return self.build_simple_result(
-            edges=edges,
-            used_nodes=used_nodes,
-            total_low_m=total_low,
-            total_high_m=total_high,
-            num_poles=num_poles,
-            debug_info=debug,
-        )
+        return mst, nodes, coords

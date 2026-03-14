@@ -1,5 +1,6 @@
 # src/solvers/simple_mst_solver.py
 import itertools
+from typing import Tuple, List
 
 import networkx as nx
 import numpy as np
@@ -8,7 +9,7 @@ from sklearn.cluster import KMeans
 
 from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
 from .registry import register_solver
-from ..utils.models import SolverResult, SolverRequest
+from ..utils.models import SolverResult, SolverRequest, Node
 
 
 @register_solver
@@ -300,50 +301,29 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return candidates
 
-    def solve(self) -> SolverResult:
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
         """
-        Executes an iterative algorithm to optimize network topology, introducing new points (poles)
-        to minimize the cost and maximize the efficiency of the resulting graph, evaluated using
-        Minimum Spanning Tree and related techniques. The method incorporates multiple candidate
-        generation strategies like Voronoi and Fermat points to identify potential new locations
-        to add to the network, and iteratively improves the network structure until stagnation or
-        a convergence criteria is met.
+        Solves the optimization problem of constructing the minimum spanning arborescence with additional candidate nodes
+        from an initial set of nodes and edges. The algorithm iteratively improves upon the solution by adding and pruning
+        nodes efficiently to minimize total weight.
+
+        Args:
+            input_tuple (Tuple): A tuple containing the following parameters:
+                - nodes (Iterable): Initial nodes of the graph.
+                - coords (np.ndarray): Coordinates of the nodes.
+                - source_idx (int): Index of the source node in the graph.
+                - terminal_indices (List[int]): Indices of the terminal nodes.
+                - names (List[str]): List of node names corresponding to `coords`.
+                - costs (np.ndarray): Cost matrix used for the spanning arborescence calculation.
 
         Returns:
-            SolverResult: The final optimized result, including the list of edges, used nodes,
-            total lengths for low and high voltage components, number of poles, and optionally
-            debug information.
+            Tuple[nx.DiGraph, List[Node], np.ndarray]: A tuple containing:
+                - Directed graph representing the optimized spanning arborescence.
+                - List of Node objects based on the optimized graph.
+                - Numpy array of the final coordinate set including additional nodes.
 
-        Raises:
-            Exception: Handles and suppresses errors during candidate evaluation, ensuring robust
-            iteration through all valid candidates without halting the process. Any exceptions
-            encountered during graph construction or candidate validation are logged.
-
-        Attributes:
-            coord (list): List of [latitude, longitude] or [longitude, latitude] coordinates,
-                depending on the indexing used. It represents the current node positions.
-            source_idx (int): Index of the source node in the network topology.
-            terminal_indices (list[int]): A list of indices representing terminal nodes in the
-                network infrastructure.
-            names (list[str]): The names of the nodes, initially populated with existing nodes
-                and expanded during the addition of new candidates (e.g., poles).
-            costs (Any): Represents the cost parameters or weight metrics involved in determining
-                the optimal network construction.
-            cur_total_weight (float): Tracks the total weight or cost of the current network
-                configuration.
-            cur_edges (Any): Holds the edges of the current spanning tree or network structure.
-            self.request.debug (int): Configurable debug level controlling verbosity and intermediate output
-                visualization, if enabled.
-
-        Note:
-            - The method internally utilizes helper functions and sub-procedures for tasks like
-              candidate generation, MST calculation, and pruning operations.
-            - The algorithm may incorporate small controlled deteriorations (e.g., <1% worsening
-              in cost) to escape local minima or plateaus in the optimization landscape.
-            - Debugging tools and plotting utilities are conditionally executed, based on the provided
-              debug configuration.
         """
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=False)
+        nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
         # We'll keep coords as list for easier appending
         current_coords = list(coords)  # list of [lat, lng] or [lng, lat] – adjust indexing accordingly
@@ -540,34 +520,4 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             min_segment_length=20.0
         )
 
-        # 6. Mark used & name poles
-        used_nodes = self.extract_used_nodes(best_pruned_mst, nodes)
-
-        # 7. Build edges + lengths
-        edges, total_low_m, total_high_m = self._build_edges_and_lengths(best_pruned_mst, used_nodes)
-
-        num_poles = sum(1 for n in used_nodes if n.type == "pole")
-
-        if self.request.debug >= 1:
-            print("Longest edge:", max([l.lengthMeters for l in edges]))
-            self._plot_current_tree(
-                used_nodes,
-                best_pruned_mst,
-                title="Best Final Plot",
-            )
-
-        debug = {
-            "method": "classic_mst_fermat",
-            "candidates_generated": len(candidates),
-            "candidates_used": num_poles,
-            "original_points": len(coords),
-        } if self.request.debug else None
-
-        return self.build_simple_result(
-            edges=edges,
-            used_nodes=used_nodes,
-            total_low_m=total_low_m,
-            total_high_m=total_high_m,
-            num_poles=num_poles,
-            debug_info=debug,
-        )
+        return best_pruned_mst, nodes, current_coords

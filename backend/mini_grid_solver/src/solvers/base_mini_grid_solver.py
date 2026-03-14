@@ -273,13 +273,37 @@ class BaseMiniGridSolver(ABC):
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
+    def _solve(self, input_tuple) -> Tuple[nx.Graph, list[Node], np.ndarray]:
+        pass
+
+
     def solve(self) -> SolverResult:
         """
         Main entry point: take the request → produce full SolverResult.
 
         This is the only method most users / tests should call directly.
+
         """
-        pass
+
+        # 1. Parse input and input into abstract solver method
+        graph, nodes, coords = self._solve(self.parse_and_validate_input(poles=True))
+
+        # 2. Extract used & name poles
+        used_nodes = self.extract_used_nodes(graph, nodes)
+
+        # 3. Build edges + lengths
+        edges, total_low, total_high = self._build_edges_and_lengths(graph, nodes)
+
+        # 4. Number of poles used
+        num_poles = sum(1 for n in used_nodes if n.type == "pole")
+
+        return self.build_solver_result(
+            edges=edges,
+            used_nodes=used_nodes,
+            total_low_m=total_low,
+            total_high_m=total_high,
+            num_poles=num_poles,
+        )
 
     # ─── Helpful common utilities (can be used or overridden) ────────────────
     def _build_nodes(self, coords, candidates, source_idx, terminals, names):
@@ -522,7 +546,7 @@ class BaseMiniGridSolver(ABC):
 
         return edges, low_m, high_m
 
-    def build_simple_result(
+    def build_solver_result(
             self,
             edges: List[OutputEdge],
             used_nodes: List[Node],

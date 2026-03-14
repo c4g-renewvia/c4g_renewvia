@@ -1019,9 +1019,8 @@ export default function DemoPage() {
         `Could not generate ${count} unique locations within the 100 square mile area. Try a smaller number of points.`
       );
     }
-
+    setOriginalDataPoints(points);
     setDataPoints(points);
-    console.log('Generated dataPoints:', dataPoints);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1105,9 +1104,12 @@ export default function DemoPage() {
   const handleRunSolver = async () => {
     let pointsToSend: LocationPoint[];
 
-    if (useExistingPoles && miniGridNodes.length > 0) {
+    console.log('Running solver with dataPoints:', dataPoints);
+    console.log('miniGridNodes:', miniGridNodes);
+
+    if (useExistingPoles && dataPoints.length > 0) {
       // Send ALL nodes (including poles) as fixed points
-      pointsToSend = miniGridNodes.map((node) => ({
+      pointsToSend = dataPoints.map((node) => ({
         name: node.name,
         type: node.type,
         lat: node.lat,
@@ -1118,7 +1120,7 @@ export default function DemoPage() {
       );
     } else {
       // Default: loop through miniGridPoints and only take poinst that are not type pole
-      pointsToSend = miniGridNodes
+      pointsToSend = dataPoints
         .filter((node) => node.type !== 'pole')
         .map((node) => ({
           name: node.name,
@@ -1160,16 +1162,6 @@ export default function DemoPage() {
     const debug = 0;
 
     try {
-      // ────────────────────────────────────────────────
-      // Only send ORIGINAL points
-      // ────────────────────────────────────────────────
-
-      if (originalDataPoints.length < 2) {
-        alert('No valid source/terminal points found to optimize.');
-        setComputingMiniGrid(false);
-        return;
-      }
-
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

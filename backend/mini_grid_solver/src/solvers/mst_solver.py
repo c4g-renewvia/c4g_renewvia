@@ -1,7 +1,8 @@
 # src/solvers/simple_mst_solver.py
-from typing import List, Literal
+from typing import List, Literal, Tuple
 
 import networkx as nx
+import numpy as np
 
 from .base_mini_grid_solver import BaseMiniGridSolver
 from .registry import register_solver
@@ -26,9 +27,9 @@ class SimpleMSTSolver(BaseMiniGridSolver):
     Good as a baseline / lower bound reference.
     """
 
-    def solve(self) -> SolverResult:
-        # 1. Parse input
-        nodes, coords, source_idx, terminal_indices, names, costs = self.parse_and_validate_input(poles=True)
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
+
+        nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
         n = len(coords)
         if n < 2:
@@ -66,28 +67,4 @@ class SimpleMSTSolver(BaseMiniGridSolver):
             used_nodes = nodes
 
 
-        # 8. Compute total lengths and assign voltage levels (all low for now)
-        edges, total_low_m, total_high_m = self._build_edges_and_lengths(mst, used_nodes)
-
-        # 9. No extra poles used
-        num_poles = len(pole_indices)
-
-        # 10. Build result using helper
-        debug_info = None
-        if self.request.debug:
-            debug_info = {
-                "method": "simple_mst_no_candidates",
-                "original_points": len(coords),
-                "poles_used": 0,
-                "edges_count": len(edges),
-                "total_length_m": round(total_low_m + total_high_m, 2),
-            }
-
-        return self.build_simple_result(
-            edges=edges,
-            used_nodes=used_nodes,
-            total_low_m=total_low_m,
-            total_high_m=total_high_m,
-            num_poles=num_poles,
-            debug_info=debug_info,
-        )
+        return mst, used_nodes, coords

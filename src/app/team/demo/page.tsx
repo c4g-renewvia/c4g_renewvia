@@ -193,7 +193,9 @@ export default function DemoPage() {
   const [isDragOver, setIsDragOver] = useState(false);
 
   const [solvers, setSolvers] = useState<Solvers[]>([]);
-  const [selectedSolverName, setSelectedSolverName] = useState<string>('');
+  const [selectedSolverName, setSelectedSolverName] = useState<string>(
+    'GreedyNSteinerSolver'
+  );
 
   const selectedSolver = solvers.find((s) => s.name === selectedSolverName);
 

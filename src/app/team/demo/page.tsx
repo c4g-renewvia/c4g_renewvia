@@ -337,17 +337,58 @@ export default function DemoPage() {
     });
 
     // drag
+    // drag
+    // drag
     marker.addListener('drag', () => {
       const current = toLiteral(marker.position);
       if (!current) return;
 
-      const curLat = current.lat; // now definitely number
-      const curLng = current.lng;
+      let targetLat = current.lat;
+      let targetLng = current.lng;
 
       const prevStr = markerDragRef.current;
       if (!prevStr) return;
       const [prevLat, prevLng] = prevStr.split(',').map(Number);
 
+      let exceedsLimit = false;
+
+      // 1. Check if the NEW position exceeds 30m for ANY attached line
+      polylinesRef.current.forEach((line) => {
+        const path = line.getPath();
+        if (path.getLength() !== 2) return;
+
+        const start = path.getAt(0);
+        const end = path.getAt(1);
+
+        const isStart =
+          Math.abs(start.lat() - prevLat) < 1e-9 &&
+          Math.abs(start.lng() - prevLng) < 1e-9;
+        const isEnd =
+          Math.abs(end.lat() - prevLat) < 1e-9 &&
+          Math.abs(end.lng() - prevLng) < 1e-9;
+
+        if (isStart) {
+          if (
+            haversineDistance(targetLat, targetLng, end.lat(), end.lng()) > 30
+          )
+            exceedsLimit = true;
+        } else if (isEnd) {
+          if (
+            haversineDistance(start.lat(), start.lng(), targetLat, targetLng) >
+            30
+          )
+            exceedsLimit = true;
+        }
+      });
+
+      // 2. Lock coordinates to the last valid position if limit is exceeded
+      if (exceedsLimit) {
+        targetLat = prevLat;
+        targetLng = prevLng;
+        marker.position = { lat: targetLat, lng: targetLng };
+      }
+
+      // 3. Update the lines using targetLat/targetLng so they NEVER detach
       const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
 
       polylinesRef.current.forEach((line) => {
@@ -357,7 +398,7 @@ export default function DemoPage() {
         const start = path.getAt(0);
         const end = path.getAt(1);
 
-        const startLat = start.lat(); // classic LatLng → method
+        const startLat = start.lat();
         const startLng = start.lng();
         const endLat = end.lat();
         const endLng = end.lng();
@@ -368,13 +409,14 @@ export default function DemoPage() {
         const lineType =
           line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
 
+        // Check which end of the line we are holding
         if (
           Math.abs(startLat - prevLat) < 1e-9 &&
           Math.abs(startLng - prevLng) < 1e-9
         ) {
           prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
-            { lat: curLat, lng: curLng }, // now safe: numbers
+            { lat: targetLat, lng: targetLng },
             { lat: endLat, lng: endLng },
           ]);
           changed = true;
@@ -385,12 +427,13 @@ export default function DemoPage() {
           prevDist = haversineDistance(startLat, startLng, endLat, endLng);
           line.setPath([
             { lat: startLat, lng: startLng },
-            { lat: curLat, lng: curLng },
+            { lat: targetLat, lng: targetLng },
           ]);
           changed = true;
         }
 
-        if (changed) {
+        // Only accumulate cost differences if it was a valid move
+        if (changed && !exceedsLimit) {
           const newDist = haversineDistance(
             line.getPath().getAt(0).lat(),
             line.getPath().getAt(0).lng(),
@@ -405,30 +448,37 @@ export default function DemoPage() {
         }
       });
 
-      setCostBreakdown((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
-          highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
-          totalMeters:
-            prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
-          wireCost:
-            prev.wireCost +
-            diff.lowVoltageMeters * lowVoltageCost +
-            diff.highVoltageMeters * highVoltageCost,
-          grandTotal:
-            prev.grandTotal +
-            diff.lowVoltageMeters * lowVoltageCost +
-            diff.highVoltageMeters * highVoltageCost,
-        };
-      });
-
-      markerDragRef.current = `${curLat},${curLng}`;
+      // 4. Update the tracker and cost state ONLY if the move was valid
+      if (!exceedsLimit) {
+        setCostBreakdown((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
+            highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
+            totalMeters:
+              prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
+            wireCost:
+              prev.wireCost +
+              diff.lowVoltageMeters * lowVoltageCost +
+              diff.highVoltageMeters * highVoltageCost,
+            grandTotal:
+              prev.grandTotal +
+              diff.lowVoltageMeters * lowVoltageCost +
+              diff.highVoltageMeters * highVoltageCost,
+          };
+        });
+        markerDragRef.current = `${targetLat},${targetLng}`;
+      }
     });
 
-    // dragend remains the same
+    // 5. Enforce final snap back when the user lets go of the mouse
     marker.addListener('dragend', () => {
+      const prevStr = markerDragRef.current;
+      if (prevStr) {
+        const [prevLat, prevLng] = prevStr.split(',').map(Number);
+        marker.position = { lat: prevLat, lng: prevLng };
+      }
       markerDragRef.current = null;
     });
 
@@ -2095,28 +2145,46 @@ export default function DemoPage() {
               Loading satellite map…
             </div>
 
-            {/* Map controls */}
-            <div className='mt-4 flex justify-end'>
-              <button
-                onClick={handleResetMap}
-                disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
-                className='flex items-center gap-2 rounded-lg bg-red-700/80 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-red-700 disabled:opacity-50'
-              >
-                <svg
-                  className='h-4 w-4'
-                  fill='none'
-                  stroke='currentColor'
-                  viewBox='0 0 24 24'
+            {/* Map controls & Live Cost */}
+            <div className='mt-6 flex flex-col-reverse items-center justify-between gap-4 sm:flex-row'>
+              {/* Spacer: Balances the flex layout so the center item stays dead center */}
+              <div className='hidden w-[140px] sm:block'></div>
+
+              {/* Centered Live Cost Display */}
+              <div className='flex flex-col items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-900/20 px-8 py-3 shadow-lg shadow-emerald-900/20 backdrop-blur-md'>
+                <span className='mb-1 text-xs font-bold tracking-widest text-emerald-400/80 uppercase'>
+                  Live Mini-grid Cost
+                </span>
+                <span className='text-3xl font-extrabold tracking-tight text-emerald-300'>
+                  ${formatUSD(costBreakdown?.grandTotal || 0)}
+                </span>
+              </div>
+
+              {/* Right Reset Button */}
+              <div className='flex w-full justify-end sm:w-auto'>
+                <button
+                  onClick={handleResetMap}
+                  disabled={
+                    dataPoints.length === 0 && miniGridNodes.length === 0
+                  }
+                  className='flex w-full items-center justify-center gap-2 rounded-lg bg-red-700/80 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-red-700 disabled:opacity-50 sm:w-[140px]'
                 >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    strokeWidth={2}
-                    d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
-                  />
-                </svg>
-                Reset Map
-              </button>
+                  <svg
+                    className='h-4 w-4'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth={2}
+                      d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
+                    />
+                  </svg>
+                  Reset Map
+                </button>
+              </div>
             </div>
           </div>
         </section>

@@ -478,12 +478,71 @@ export default function DemoPage() {
     });
 
     // 5. Enforce final snap back when the user lets go of the mouse
+    // 5. Enforce final snap back when the user lets go of the mouse
     marker.addListener('dragend', () => {
+      let finalLat = point.lat; // default to original pre-drag location
+      let finalLng = point.lng;
+
       const prevStr = markerDragRef.current;
       if (prevStr) {
+        // Snap the visual marker to the last valid position
         const [prevLat, prevLng] = prevStr.split(',').map(Number);
         marker.position = { lat: prevLat, lng: prevLng };
+        finalLat = prevLat;
+        finalLng = prevLng;
       }
+
+      // 6. SYNC REACT STATE: Ensure exports and saves use the new coordinates
+
+      // Update Nodes array
+      setMiniGridNodes((prev) =>
+        prev.map((n) =>
+          n.name === point.name ? { ...n, lat: finalLat, lng: finalLng } : n
+        )
+      );
+
+      // Update Input Points array
+      setDataPoints((prev) =>
+        prev.map((p) =>
+          p.name === point.name ? { ...p, lat: finalLat, lng: finalLng } : p
+        )
+      );
+
+      // Update Edges array (so the new line lengths and connections are saved)
+      setMiniGridEdges((prev) =>
+        prev.map((edge) => {
+          // Identify if the dragged point was the start or end of this edge
+          // using the original pre-drag coordinates stored in the `point` closure
+          const isStart =
+            Math.abs(edge.start.lat - point.lat) < 1e-9 &&
+            Math.abs(edge.start.lng - point.lng) < 1e-9;
+
+          const isEnd =
+            Math.abs(edge.end.lat - point.lat) < 1e-9 &&
+            Math.abs(edge.end.lng - point.lng) < 1e-9;
+
+          if (isStart || isEnd) {
+            const newStart = isStart
+              ? { lat: finalLat, lng: finalLng }
+              : edge.start;
+            const newEnd = isEnd ? { lat: finalLat, lng: finalLng } : edge.end;
+
+            return {
+              ...edge,
+              start: newStart,
+              end: newEnd,
+              lengthMeters: haversineDistance(
+                newStart.lat,
+                newStart.lng,
+                newEnd.lat,
+                newEnd.lng
+              ),
+            };
+          }
+          return edge;
+        })
+      );
+
       markerDragRef.current = null;
     });
 

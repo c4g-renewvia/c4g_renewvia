@@ -1649,6 +1649,8 @@ export default function DemoPage() {
           <p className='mb-6 text-lg text-zinc-400'>
             <a
               href={'https://forms.gle/DCsp8A1wkh9tmX6PA'}
+              target='_blank'
+              rel='noopener noreferrer'
               className='underline hover:text-emerald-300'
             >
               C4G Mini-grid Optimization Feedback Form
@@ -1663,7 +1665,7 @@ export default function DemoPage() {
             1. Define Locations
           </h2>
 
-          <div className='grid gap-6 lg:grid-cols-2 xl:grid-cols-3'>
+          <div className='grid gap-6 lg:grid-cols-3 xl:grid-cols-3'>
             {/* Upload Card */}
             <div className='rounded-xl border border-zinc-700/70 bg-zinc-900/50 p-6 backdrop-blur-sm'>
               <label className='mb-3 block text-lg font-semibold text-zinc-100'>

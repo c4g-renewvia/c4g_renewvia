@@ -168,7 +168,7 @@ export default function DemoPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [poleCost, setPoleCost] = useState<number>(100);
+  const [poleCost, setPoleCost] = useState<number>(1000);
   const [lowVoltageCost, setLowVoltageCost] = useState<number>(10);
   const [highVoltageCost, setHighVoltageCost] = useState<number>(20);
   const [calculationResult] = useState<string>('');
@@ -1390,12 +1390,37 @@ export default function DemoPage() {
   `
       : 'No cost data available';
 
+    let summaryLat = 0;
+    let summaryLng = 0;
+
+    // Find the source node
+    const sourceNode = miniGridNodes.find((node) => node.type === 'source');
+    if (sourceNode) {
+      summaryLat = sourceNode.lat;
+      summaryLng = sourceNode.lng;
+    } else {
+      // Fallback: use the first node if no explicit source (rare)
+      if (miniGridNodes.length > 0) {
+        summaryLat = miniGridNodes[0].lat;
+        summaryLng = miniGridNodes[0].lng;
+      }
+      console.warn(
+        'No source node found — using first node for summary position'
+      );
+    }
+
+    const offsetMeters = 3; // ~15 meters north-east
+    const offsetLat = summaryLat + offsetMeters / 111111; // rough 1° lat ≈ 111 km
+    const offsetLng =
+      summaryLng +
+      offsetMeters / (111111 * Math.cos((summaryLat * Math.PI) / 180));
+
     const summaryPlacemark = `
     <Placemark>
       <name>Mini-Grid Cost Summary</name>
       <styleUrl>#summary</styleUrl>
       <description><![CDATA[${summaryDescription}]]></description>
-      <Point><coordinates>0,0,0</coordinates></Point>
+      <coordinates>${offsetLng.toFixed(8)},${offsetLat.toFixed(8)},0</coordinates>;
     </Placemark>
   `;
 

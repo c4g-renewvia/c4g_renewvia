@@ -9,7 +9,7 @@ from sklearn.cluster import KMeans
 
 from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
 from .registry import register_solver
-from ..utils.models import SolverResult, SolverRequest, Node
+from ..utils.models import SolverRequest, Node
 
 
 @register_solver
@@ -369,6 +369,9 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             for i in range(1, self.n + 1):
                 combinations += itertools.combinations(candidates, i)
 
+            if self.request.debug >= 1:
+                print(f"Generated {len(combinations)} combinations of {self.n} candidates")
+
             for cands in combinations:
                 cands = np.array(cands)
 
@@ -416,8 +419,9 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 break
 
             # Accept the winner
-            print(
-                f"→ Adding candidate {best_candidates} → new length: {best_cost:.2f} m (max edge: {best_max_edge:.2f} m)")
+            if self.request.debug >= 1:
+                print(f"→ Adding candidate {best_candidates} → "
+                      f"new length: {best_cost:.2f} m (max edge: {best_max_edge:.2f} m)")
 
             # set current coordinates
             added_candidates = np.vstack([added_candidates, best_candidates])

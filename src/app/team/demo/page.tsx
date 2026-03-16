@@ -1642,7 +1642,22 @@ export default function DemoPage() {
       </header>
 
       <main className='mx-auto w-full max-w-7xl flex-1 px-4 py-10 lg:px-6 lg:py-12'>
+        <section className='rounded-xl border border-zinc-700/70 bg-zinc-900/50 p-6 text-center backdrop-blur-sm'>
+          <h2 className='mb-4 text-3xl font-bold tracking-tight text-emerald-300/95'>
+            Evaluation Feedback Form
+          </h2>
+          <p className='mb-6 text-lg text-zinc-400'>
+            <a
+              href={'https://forms.gle/DCsp8A1wkh9tmX6PA'}
+              className='underline hover:text-emerald-300'
+            >
+              C4G Mini-grid Optimization Feedback Form
+            </a>
+          </p>
+        </section>
+        <br />
         {/* ── 1. INPUT SECTION ──────────────────────────────────────────────── */}
+
         <section className='mb-12 lg:mb-16'>
           <h2 className='mb-6 text-3xl font-bold text-emerald-300/95 md:text-4xl'>
             1. Define Locations

@@ -189,6 +189,11 @@ export default function DemoPage() {
     pointCount: 0,
     grandTotal: 0,
   });
+  const [originalTotalCost, setOriginalTotalCost] = useState<number>(0);
+
+  const costDiff = costBreakdown?.grandTotal - originalTotalCost || 0;
+  const isNegative = costDiff <= 0;
+
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -1303,6 +1308,8 @@ export default function DemoPage() {
         usedLowCostPerMeter: usedCosts?.lowVoltageCostPerMeter,
         usedHighCostPerMeter: usedCosts?.highVoltageCostPerMeter,
       });
+
+      setOriginalTotalCost(totalCostEstimate);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Failed to run solver';
@@ -1543,6 +1550,8 @@ export default function DemoPage() {
 
     // Load cost breakdown if it exists
     setCostBreakdown(run.costBreakdown);
+
+    setOriginalTotalCost(run.costBreakdown?.grandTotal || 0);
 
     // Restore file name / metadata
     setFileName(run.fileName || null);
@@ -2149,7 +2158,6 @@ export default function DemoPage() {
             <div className='mt-6 flex flex-col-reverse items-center justify-between gap-4 sm:flex-row'>
               {/* Spacer: Balances the flex layout so the center item stays dead center */}
               <div className='hidden w-[140px] sm:block'></div>
-
               {/* Centered Live Cost Display */}
               <div className='flex flex-col items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-900/20 px-8 py-3 shadow-lg shadow-emerald-900/20 backdrop-blur-md'>
                 <span className='mb-1 text-xs font-bold tracking-widest text-emerald-400/80 uppercase'>
@@ -2159,7 +2167,38 @@ export default function DemoPage() {
                   ${formatUSD(costBreakdown?.grandTotal || 0)}
                 </span>
               </div>
-
+              -{/* Center solver cost display */}
+              <div className='flex flex-col items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-900/20 px-8 py-3 shadow-lg shadow-emerald-900/20 backdrop-blur-md'>
+                <span className='mb-1 text-xs font-bold tracking-widest text-emerald-400/80 uppercase'>
+                  Solver Mini-grid Cost
+                </span>
+                <span className='text-3xl font-extrabold tracking-tight text-emerald-300'>
+                  ${formatUSD(originalTotalCost || 0)}
+                </span>
+              </div>
+              =
+              <div
+                className={`flex flex-col items-center justify-center rounded-2xl border px-8 py-3 shadow-lg backdrop-blur-md ${
+                  isNegative
+                    ? 'border-emerald-500/30 bg-emerald-900/20 shadow-emerald-900/20'
+                    : 'border-red-500/30 bg-red-900/20 shadow-red-900/20'
+                }`}
+              >
+                <span
+                  className={`mb-1 text-xs font-bold tracking-widest uppercase ${
+                    isNegative ? 'text-emerald-400/80' : 'text-red-400/80'
+                  }`}
+                >
+                  Cost Difference
+                </span>
+                <span
+                  className={`text-3xl font-extrabold tracking-tight ${
+                    isNegative ? 'text-emerald-300' : 'text-red-400'
+                  }`}
+                >
+                  {isNegative ? '-' : '+'}${formatUSD(Math.abs(costDiff))}
+                </span>
+              </div>
               {/* Right Reset Button */}
               <div className='flex w-full justify-end sm:w-auto'>
                 <button

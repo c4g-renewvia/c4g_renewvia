@@ -480,7 +480,7 @@ class BaseMiniGridSolver(ABC):
         for node in nodes:
             if node.index in used_indices:
                 node.used = True
-                if node.type == "pole" and not node.name:
+                if node.type == "pole":
                     node.name = f"Pole {pole_counter}"
                     pole_counter += 1
                 used_nodes.append(node)

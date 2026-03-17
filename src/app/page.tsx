@@ -19,7 +19,7 @@ export default function Home() {
         <h1 className='text-4xl font-semibold tracking-tight text-balance text-white sm:text-6xl'>
           Renewvia Mini-Grid{' '}
           <span className='bg-linear-to-r from-emerald-300 via-sky-300 to-violet-300 bg-clip-text text-transparent'>
-            Solver
+            Optimization
           </span>{' '}
           Project
         </h1>

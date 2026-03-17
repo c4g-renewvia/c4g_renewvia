@@ -1065,6 +1065,7 @@ export default function DemoPage() {
   const generateTestData = (count: number) => {
     // Reset anything derived from the previous data
     setMiniGridEdges([]);
+    setOriginalTotalCost(0);
     setCostBreakdown({
       lowVoltageMeters: 0,
       highVoltageMeters: 0,

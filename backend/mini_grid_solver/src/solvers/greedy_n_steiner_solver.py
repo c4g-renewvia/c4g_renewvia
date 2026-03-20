@@ -109,8 +109,6 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         candidates = []
         coords_array = np.array(coords)  # shape (n, 2) [lat, lng] or [lng, lat]
 
-        print(len(coords) // 3)
-
         for k in range(len(coords) // 2, len(coords) // 2 + 2):
             try:
                 kmeans = KMeans(n_clusters=k, n_init=n_init, random_state=42)
@@ -415,7 +413,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
             # ─── Decide whether to accept ──────────────────────────────────────
             if best_cost >= cur_total_weight:  # allow tiny worsening to escape plateaus if needed
-                print("No meaningful improvement found → stopping")
+                if self.request.debug >= 1:
+                    print("No meaningful improvement found → stopping")
                 break
 
             # Accept the winner
@@ -454,7 +453,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         # ==========================================
         # DROP PHASE (REVERSE DELETION)
         # ==========================================
-        print("\n--- Starting Drop Phase (Reverse Deletion) ---")
+        if self.request.debug >= 1:
+            print("\n--- Starting Drop Phase (Reverse Deletion) ---")
 
         # We need the base original coords to easily rebuild the lists
         original_coords_array = np.array(coords)
@@ -496,8 +496,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             # If dropping the pole makes the cost LOWER or EXACTLY THE SAME, we drop it!
             # (We prefer fewer poles, so dropping it on a tie is inherently better)
             if total_cost <= cur_total_weight:
-                print(
-                    f"Drop Phase: Successfully removed redundant pole at {candidate_to_drop}. New cost: {total_cost:.2f}")
+                if self.request.debug >= 1:
+                    print(f"Drop Phase: Successfully removed redundant pole at {candidate_to_drop}. New cost: {total_cost:.2f}")
 
                 # Permanently update our tracking variables
                 added_candidates = test_added_candidates
@@ -512,7 +512,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                     current_coords = original_coords_array
                 current_names = list(names) + ["pole"] * len(added_candidates)
 
-        print("--- Drop Phase Complete ---\n")
+        if self.request.debug >= 1:
+            print("--- Drop Phase Complete ---\n")
         # ==========================================
 
         nodes = self._build_nodes(np.array(current_coords), [], source_idx, terminal_indices, current_names)

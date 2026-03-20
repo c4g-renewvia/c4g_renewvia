@@ -36,7 +36,7 @@ req = SolverRequest(
         "lowVoltageCostPerMeter": 10.0,
         "highVoltageCostPerMeter": 20.0,
     },
-    debug=2,
+    debug=0,
 )
 
 solvers = {"solvers": []}
@@ -49,9 +49,9 @@ for solver_name, solver_class in SOLVER_REGISTRY.items():
 print(solvers)
 # result = SimpleMSTSolver(req).solve()
 # result = StaticFermatMSTSolver(req).solve()
-result = SteinerizedMSTSolver(req).solve()
+# result = SteinerizedMSTSolver(req).solve()
 # result = StaticVoronoiMSTSolver(req).solve()
-# result = GreedyNSteinerSolver(req).solve()
+result = GreedyNSteinerSolver(req).solve()
 
 
 print(result)

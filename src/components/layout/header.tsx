@@ -19,14 +19,14 @@ export function Header() {
             height='32'
           />
         </Link>
-        {status === 'authenticated' ? (
-          <Link
-            href='/dashboard'
-            className='hover:text-primary text-sm font-medium'
-          >
-            Dashboard
-          </Link>
-        ) : null}
+        {/*{status === 'authenticated' ? (*/}
+        {/*  <Link*/}
+        {/*    href='/dashboard'*/}
+        {/*    className='hover:text-primary text-sm font-medium'*/}
+        {/*  >*/}
+        {/*    Dashboard*/}
+        {/*  </Link>*/}
+        {/*) : null}*/}
         {status === 'authenticated' && data?.user.role === 'ADMIN' ? (
           <Link
             href='/users'

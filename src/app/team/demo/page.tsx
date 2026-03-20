@@ -1792,7 +1792,7 @@ export default function DemoPage() {
           </h2>
           <p className='mb-6 text-lg text-zinc-400'>
             <a
-              href={'https://forms.gle/DCsp8A1wkh9tmX6PA'}
+              href={'https://forms.gle/fVte9CrdRMWChcby8'}
               target='_blank'
               rel='noopener noreferrer'
               className='underline hover:text-emerald-300'

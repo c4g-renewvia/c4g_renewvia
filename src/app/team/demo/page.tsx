@@ -19,6 +19,8 @@ import { useSession } from 'next-auth/react';
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
+console.log('GOOGLE_MAPS_API_KEY', GOOGLE_MAPS_API_KEY);
+
 function toLiteral(
   pos: google.maps.marker.AdvancedMarkerElement['position']
 ): google.maps.LatLngLiteral | null {
@@ -1186,6 +1188,7 @@ export default function DemoPage() {
 
     // Reset state
     setDataPoints(originalDataPoints); // if you're using the originalPoints state
+    setOriginalTotalCost(0);
     setMiniGridNodes([]);
     setMiniGridEdges([]);
     setCostBreakdown({
@@ -1253,6 +1256,7 @@ export default function DemoPage() {
     }
 
     setComputingMiniGrid(true);
+    setOriginalTotalCost(0);
     setMiniGridEdges([]);
     setCostBreakdown({
       lowVoltageMeters: 0,
@@ -2187,8 +2191,15 @@ export default function DemoPage() {
                               : 'Test data'}
                           </p>
                           <p className='mt-0.5 text-xs text-zinc-600'>
-                            {new Date(run.createdAt).toLocaleString()} <br />
-                            {run.miniGridNodes?.length || '?'} nodes
+                            {new Date(run.createdAt).toLocaleString()}
+                            <br />
+                            {run.miniGridNodes?.length || '?'} nodes |{' '}
+                            <span className='font-medium text-green-600'>
+                              {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                              }).format(run.costBreakdown.grandTotal)}
+                            </span>
                           </p>
                         </div>
                       ))}
@@ -2310,9 +2321,7 @@ export default function DemoPage() {
                     step='0.01'
                     min='0'
                     value={poleCost}
-                    onChange={(e) =>
-                      setPoleCost(parseFloat(e.target.value) || 0)
-                    }
+                    onChange={(e) => setPoleCost(parseFloat(e.target.value))}
                     className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
                   />
                 </div>
@@ -2326,7 +2335,7 @@ export default function DemoPage() {
                     min='0'
                     value={lowVoltageCost}
                     onChange={(e) =>
-                      setLowVoltageCost(parseFloat(e.target.value) || 0)
+                      setLowVoltageCost(parseFloat(e.target.value))
                     }
                     className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
                   />
@@ -2341,7 +2350,7 @@ export default function DemoPage() {
                     min='0'
                     value={highVoltageCost}
                     onChange={(e) =>
-                      setHighVoltageCost(parseFloat(e.target.value) || 0)
+                      setHighVoltageCost(parseFloat(e.target.value))
                     }
                     className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
                   />

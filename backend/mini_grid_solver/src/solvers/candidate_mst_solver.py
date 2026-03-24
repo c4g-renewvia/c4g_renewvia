@@ -9,23 +9,10 @@ from scipy.spatial import Voronoi, Delaunay
 from shapely.geometry import Point
 from shapely.wkt import loads
 
-from .base_mini_grid_solver import BaseMiniGridSolver
+from .base_mini_grid_solver import *
 from ..utils.models import *
 
-# For Voronoi candidates:
-MIN_DIST_TO_TERMINAL = 10.0,
-MAX_CIRCUMRADIUS = 300.0
-MIN_CANDIDATE_SEPARATION = 10.0
 
-MIN_POLE_TO_TERMINAL = 10.0
-MAX_POLE_TO_TERMINAL_LV = 30.0
-# MAX_POLE_TO_TERMINAL_HV = 50.0
-
-MIN_POLE_TO_POLE = 10.0
-MAX_POLE_TO_POLE_LV = 30.0
-# MAX_POLE_TO_POLE_HV = 50.0
-
-MAX_EDGE_DIST_PENALTY = 10000
 
 
 class CandidateMSTSolver(BaseMiniGridSolver):
@@ -140,7 +127,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             mst: nx.DiGraph,
             nodes: List,
             max_length_m: float = 30.0,
-            min_segment_length: float = 25.0,
+            min_segment_length: float = 15.0,
     ) -> Tuple[nx.DiGraph, List]:
         """
         Break long edges (> max_length_m meters) into multiple shorter segments by
@@ -164,6 +151,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         # Keep track of the highest index used so far
         next_index = max(n.index for n in new_nodes) + 1
+
+
 
         # Copy all short edges directly + fragment long ones
         for u, v, data in list(mst.edges(data=True)):
@@ -224,8 +213,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                     next_index,
                     length=segment_length,
                     voltage=voltage,
-                    weight=0,
-                    # copy any other attributes you care about
+                    weight=self.calc_edge_weight(segment_length, voltage=voltage, pole=True)
                 )
 
                 prev_idx = next_index
@@ -237,7 +225,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 v,
                 length=segment_length,
                 voltage=voltage,
-                weight=0,
+                weight=self.calc_edge_weight(segment_length, voltage=voltage, pole=True),
             )
 
         # Optional: copy graph-level attributes if any exist
@@ -527,7 +515,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             terminal_indices=terminal_indices,
             pole_indices=pole_indices,
             dist_matrix=dist_matrix,
-            costs=costs,
         )
 
         arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)

@@ -10,6 +10,21 @@ from matplotlib import collections as mc
 
 from ..utils.models import *
 
+# For Voronoi candidates:
+MIN_DIST_TO_TERMINAL = 10.0,
+MAX_CIRCUMRADIUS = 300.0
+MIN_CANDIDATE_SEPARATION = 10.0
+
+MIN_POLE_TO_TERMINAL = 10.0
+MAX_POLE_TO_TERMINAL_LV = 30.0
+# MAX_POLE_TO_TERMINAL_HV = 50.0
+
+MIN_POLE_TO_POLE = 10.0
+MAX_POLE_TO_POLE_LV = 30.0
+# MAX_POLE_TO_POLE_HV = 50.0
+
+MAX_EDGE_DIST_PENALTY = 10000
+
 
 class BaseMiniGridSolver(ABC):
     """
@@ -380,15 +395,45 @@ class BaseMiniGridSolver(ABC):
 
         return self._nodes, self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
+    def calc_edge_weight(self, length, voltage="low", pole=True):
+        """
+        Cost of wire and pole
+        Args:
+            length: length of edge
+            voltage_cost_key: cost to use for edge. key in self.request.costs dict,
+                e.g. "lowVoltageCostPerMeter" or "highVoltageCostPerMeter"
+
+        Returns:
+
+        """
+        low_voltage_cost = self.request.costs.get(f"{voltage}VoltageCostPerMeter", 10.0)
+        pole_cost = self.request.costs.get("poleCost", 10.0)
+        weight = length * low_voltage_cost
+
+        extra_poles = max(0, math.ceil(length / MAX_POLE_TO_POLE_LV) - 1)
+        weight += extra_poles * pole_cost
+
+        if pole:
+            weight += pole_cost
+
+        return weight
+
+    def _compute_total_cost(self, graph, source_idx):
+        total_cost = 0.0
+        for u, v, d in graph.edges(data=True):
+            length = d.get("length", 0.0)
+            voltage = d.get("voltage", "low")
+            pole_on_edge = (u != source_idx)  # pole at the "from" node for most cases
+            total_cost += self.calc_edge_weight(length, voltage=voltage, pole=pole_on_edge)
+
+        return total_cost
+
     def build_directed_graph_for_arborescence(
             self,
             source_idx,
             terminal_indices,
             pole_indices,
             dist_matrix,
-            costs,
-            max_pole_to_pole_lv=30,
-            max_pole_to_terminal_lv=30,
     ) -> nx.DiGraph:
         """
         Builds a directed graph for use in finding a minimum-cost arborescence given
@@ -413,48 +458,34 @@ class BaseMiniGridSolver(ABC):
 
         """
 
-        pole_cost = float(costs.get("poleCost", 100.0))
-        low_voltage_cost_per_meter = float(costs.get("lowVoltageCostPerMeter", 10.0))
-        high_voltage_cost_per_meter = float(costs.get("highVoltageCostPerMeter", 20.0))
-
         DG = nx.DiGraph()
 
         # 1: source → poles (main trunk)
         for p in pole_indices:
             d = dist_matrix[source_idx, p]
             if 0.1 < d:
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                extra_poles_needed = int(d // max_pole_to_pole_lv)
-                w += extra_poles_needed * pole_cost
-
-                DG.add_edge(source_idx, p, weight=w, length=d, voltage="low")
+                voltage = "low"
+                w = self.calc_edge_weight(d, voltage=voltage, pole=True)
+                DG.add_edge(source_idx, p, weight=w, length=d, )
 
         # 2: Bidirectional pole ↔ pole (undirected spans)
         for i in range(len(pole_indices)):
             for j in range(i + 1, len(pole_indices)):
                 p1, p2 = pole_indices[i], pole_indices[j]
                 d = dist_matrix[p1, p2]
-
-                # cost of wire and pole
-                w = (d * low_voltage_cost_per_meter) + pole_cost
-                extra_poles_needed = int(d // max_pole_to_pole_lv)
-                w += extra_poles_needed * pole_cost
-
+                voltage = "low"
+                w = self.calc_edge_weight(d, voltage=voltage, pole=True)
                 if 0.1 < d:
-                    DG.add_edge(p1, p2, weight=w, length=d, voltage="low")
+                    DG.add_edge(p1, p2, weight=w, length=d, voltage=voltage)
 
         # 3: poles → terminals (service drops)
         for p in pole_indices:
             for h in terminal_indices:
                 d = dist_matrix[p, h]
                 if 0.1 < d:
-                    # cost of wire
-                    w = d * low_voltage_cost_per_meter
-
-                    extra_poles_needed = int(d // max_pole_to_terminal_lv)
-                    w += extra_poles_needed * pole_cost
-
-                    DG.add_edge(p, h, weight=w, length=d, voltage="low")
+                    voltage = "low"
+                    w = self.calc_edge_weight(d, voltage=voltage, pole=False)
+                    DG.add_edge(p, h, weight=w, length=d, voltage=voltage)
 
         return DG
 

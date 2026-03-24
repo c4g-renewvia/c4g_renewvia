@@ -49,14 +49,23 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
     def generate_projection_candidates(
             self,
-            coords_array,  # np.array (n_total, 2) current points [lat, lng]
-            edge_list,  # list of (u_idx, v_idx) from current tree
-            terminal_indices,  # original terminal indices (fixed)
-            max_dist_to_line=40.0,  # meters — how close a terminal must be to the line
-            min_dist_to_existing=5.0  # avoid adding very close to existing points
+            coords_array,
+            edge_list,
+            terminal_indices,
+            max_dist_to_line=40.0,
+            min_dist_to_existing=5.0
     ):
         """
-        Project nearby terminals onto current edges to create T-junction candidates.
+
+        Args:
+            coords_array:  np.array (n_total, 2) current points [lat, lng]
+            edge_list:  list of (u_idx, v_idx) from current tree
+            terminal_indices: original terminal indices (fixed)
+            max_dist_to_line: meters — how close a terminal must be to the line
+            min_dist_to_existing: avoid adding very close to existing points
+
+        Returns:
+
         """
         candidates = []
 
@@ -323,33 +332,30 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         """
         nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
-        # We'll keep coords as list for easier appending
-        current_coords = list(coords)  # list of [lat, lng] or [lng, lat] – adjust indexing accordingly
+        current_coords = list(coords)
         current_names = list(names)
-
-        added_candidates = np.empty([0, 2])
+        added_candidates = np.empty((0, 2), dtype=float)
         iteration = 0
+        stagnation_counter = 0
+        MAX_STAGNATION = 3
+        IMPROVEMENT_THRESHOLD = 2.0  # meters — you can make it 1.0 or 5.0
 
         cur_total_weight = np.inf
         cur_edges = None
+        best_nodes = None
+        best_pruned_mst = None
 
-        terminal_cluster_centers = self.generate_cluster_center_candidates(np.array(coords),
-                                                                           min_clusters=2,
-                                                                           max_clusters=12,
-                                                                           n_init=5)  # lower n_init for speed
+        terminal_cluster_centers = self.generate_cluster_center_candidates(
+            np.array(coords), min_clusters=2, max_clusters=12, n_init=5)
 
         while True:
             iteration += 1
             if self.request.debug >= 1:
-                print(f"\nIteration {iteration}")
+                print(f"\nIteration {iteration} (stagnation: {stagnation_counter}/{MAX_STAGNATION})")
 
-            # get candidate positions
-            candidates = self.generate_candidates(np.array(current_coords),
-                                                  cur_edges,
-                                                  terminal_cluster_centers,
-                                                  added_candidates,
-                                                  max_length=MAX_POLE_TO_POLE_LV,
-                                                  num_per_edge=3)
+            candidates = self.generate_candidates(
+                np.array(current_coords), cur_edges, terminal_cluster_centers,
+                added_candidates, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3)
 
             if len(candidates) == 0:
                 print("No candidates found")
@@ -362,67 +368,55 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             best_nodes = None
             best_edges = None
 
-            # get self.n combinations of candidates
-            combinations = []
-            for i in range(1, self.n + 1):
-                combinations += itertools.combinations(candidates, i)
+            # Evaluate combinations
+            for k in range(1, self.n + 1):
+                for cands_tup in itertools.combinations(candidates, k):
+                    cands = np.array(cands_tup)
+                    trial_coords = np.vstack([current_coords, cands])
+                    trial_names = current_names + ['pole'] * len(cands)
 
-            if self.request.debug >= 1:
-                print(f"Generated {len(combinations)} combinations of {self.n} candidates")
+                    trial_nodes = self._build_nodes(np.array(current_coords), cands,
+                                                    source_idx, terminal_indices, trial_names)
+                    trial_dist_matrix = self.compute_distance_matrix(trial_coords)
+                    pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
-            for cands in combinations:
-                cands = np.array(cands)
+                    DG = self.build_directed_graph_for_arborescence(
+                        source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix)
+                    arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
+                    pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-                # Build temporary point set with this candidate
-                trial_coords = np.vstack([current_coords, cands])
-                trial_names = current_names + ['pole'] * len(cands)
+                    total_cost = self._compute_total_cost(pruned, source_idx)
 
-                trial_nodes = self._build_nodes(np.array(current_coords), cands, source_idx, terminal_indices,
-                                                trial_names)
-                trial_dist_matrix = self.compute_distance_matrix(trial_coords)
+                    if total_cost < best_cost:
+                        best_cost = total_cost
+                        best_max_edge = max((pruned.get_edge_data(*e)["length"] for e in pruned.edges()), default=0)
+                        best_candidates = cands
+                        best_pruned_mst = pruned
+                        best_nodes = trial_nodes
+                        best_edges = list(pruned.edges())
 
-                pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
-
-                DG = self.build_directed_graph_for_arborescence(
-                    source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs,
-                    max_pole_to_pole_lv=MAX_POLE_TO_POLE_LV,
-                    max_pole_to_terminal_lv=MAX_POLE_TO_POLE_LV
-                )
-
-                arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-                pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
-
-                total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
-
-                if self.request.debug >= 2:
-                    self._plot_current_tree(
-                        trial_nodes,
-                        pruned,
-                        added_points=cands,
-                        title=f"Debug {cands}",
-                        filename=None
-                    )
-
-                if total_cost < best_cost:
-                    best_cost = total_cost
-                    best_max_edge = max(pruned.get_edge_data(*e)["length"] for e in pruned.edges())
-                    best_candidates = cands
-                    best_pruned_mst = pruned
-                    best_nodes = trial_nodes
-                    best_edges = pruned.edges()
-
-            # ─── Decide whether to accept ──────────────────────────────────────
-            if best_cost >= cur_total_weight:  # allow tiny worsening to escape plateaus if needed
+            # === NEW STAGNATION LOGIC ===
+            if best_cost > cur_total_weight + IMPROVEMENT_THRESHOLD:
                 if self.request.debug >= 1:
                     print("No meaningful improvement found → stopping")
                 break
 
+            # Accept even if same cost (but count stagnation)
+            if abs(best_cost - cur_total_weight) < 0.01:  # essentially same cost
+                stagnation_counter += 1
+            else:
+                stagnation_counter = 0
+
+            if stagnation_counter >= MAX_STAGNATION:
+                if self.request.debug >= 1:
+                    print(f"Stagnated for {MAX_STAGNATION} iterations → stopping")
+                break
+
             # Accept the winner
             if self.request.debug >= 1:
-                print(f"→ Adding candidate {best_candidates} → "
-                      f"new length: {best_cost:.2f} m (max edge: {best_max_edge:.2f} m)")
+                delta = best_cost - cur_total_weight
+                print(f"→ Adding {best_candidates} → new length: {best_cost:.2f} m (Δ {delta:+.2f} m)")
 
-            # set current coordinates
             added_candidates = np.vstack([added_candidates, best_candidates])
             current_coords = np.vstack([current_coords, best_candidates])
             current_names = current_names + ['pole'] * len(best_candidates)
@@ -430,99 +424,77 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             cur_total_weight = best_cost
             cur_edges = best_edges
 
-            # ─── PLOT THE WINNING STATE AFTER ADDITION ─────────────────────────
+            # Refresh clusters occasionally
+            if iteration % 3 == 0:
+                terminal_cluster_centers = self.generate_cluster_center_candidates(
+                    np.array(current_coords), min_clusters=2, max_clusters=12, n_init=5)
+
             if self.request.debug >= 1:
-                plot_title = f"Iteration {iteration} – Added pole at {best_candidates} (length: {best_cost:.1f} m)"
+                self._plot_current_tree(best_nodes, best_pruned_mst,
+                                        added_points=best_candidates,
+                                        title=f"Iteration {iteration} – Added pole (Δ {delta:+.1f} m)")
 
-                self._plot_current_tree(
-                    best_nodes,
-                    best_pruned_mst,
-                    added_points=best_candidates,
-                    title=plot_title,
-                    filename=None
-                )
-
-        if self.request.debug >= 1:
-            self._plot_current_tree(
-                best_nodes,
-                best_pruned_mst,
-                title="Split MST before Drop Phase",
-                added_points=None,
-            )
 
         # ==========================================
-        # DROP PHASE (REVERSE DELETION)
+        # DROP PHASE (Reverse Deletion)
         # ==========================================
         if self.request.debug >= 1:
             print("\n--- Starting Drop Phase (Reverse Deletion) ---")
 
-        # We need the base original coords to easily rebuild the lists
         original_coords_array = np.array(coords)
+        current_added = [tuple(c) for c in added_candidates]
 
-        # Iterate in reverse (unwinding the newest additions first)
-        candidates_to_check = list(reversed(added_candidates))
+        for candidate_to_drop_tup in list(reversed([tuple(c) for c in added_candidates])):
+            test_added = [c for c in current_added if c != candidate_to_drop_tup]
 
-        for candidate_to_drop in candidates_to_check:
-            # Create a test list of candidates without the current one
-            test_added_candidates = [c for c in added_candidates if tuple(c) != tuple(candidate_to_drop)]
-
-            # Build nodes using the original coords and the TEST candidates
             trial_nodes = self._build_nodes(
-                original_coords_array,
-                test_added_candidates,
-                source_idx,
-                terminal_indices,
-                names  # Original names
+                original_coords_array, test_added, source_idx, terminal_indices, names
             )
-
-            # Reconstruct trial_coords for the distance matrix
             trial_coords = np.array([[n.lat, n.lng] for n in trial_nodes])
             trial_dist_matrix = self.compute_distance_matrix(trial_coords)
             pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
-            # Build graph and compute MST
             DG = self.build_directed_graph_for_arborescence(
-                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix, costs,
-                max_pole_to_pole_lv=MAX_POLE_TO_POLE_LV,
-                max_pole_to_terminal_lv=MAX_POLE_TO_POLE_LV
-
+                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix
             )
-
             arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
             pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-            total_cost = sum(pruned.get_edge_data(*e)["weight"] for e in pruned.edges())
+            total_cost = self._compute_total_cost(pruned, source_idx)
 
-            # If dropping the pole makes the cost LOWER or EXACTLY THE SAME, we drop it!
-            # (We prefer fewer poles, so dropping it on a tie is inherently better)
-            if total_cost <= cur_total_weight:
+            if total_cost <= cur_total_weight + 1e-3:   # small tolerance
                 if self.request.debug >= 1:
-                    print(f"Drop Phase: Successfully removed redundant pole at {candidate_to_drop}. New cost: {total_cost:.2f}")
+                    print(f"Drop Phase: Removed redundant pole at {candidate_to_drop_tup}. "
+                          f"New cost: {total_cost:.2f} m")
 
-                # Permanently update our tracking variables
-                added_candidates = test_added_candidates
+                current_added = test_added
                 cur_total_weight = total_cost
-                best_pruned_mst = pruned
-
-                # Update current_coords and current_names to reflect the drop
-                # so the rest of your original post-processing works seamlessly
-                if added_candidates:
-                    current_coords = np.vstack([original_coords_array, added_candidates])
-                else:
-                    current_coords = original_coords_array
-                current_names = list(names) + ["pole"] * len(added_candidates)
+                best_pruned_mst = pruned          # update graph
+                best_nodes = trial_nodes          # update nodes to match the graph indices
 
         if self.request.debug >= 1:
             print("--- Drop Phase Complete ---\n")
-        # ==========================================
 
-        nodes = self._build_nodes(np.array(current_coords), [], source_idx, terminal_indices, current_names)
+        # Final nodes + split
+        final_added_candidates = np.array(current_added) if current_added else np.empty((0, 2), dtype=float)
 
-        best_pruned_mst, nodes = self.split_long_edges_with_coords(
+        nodes = self._build_nodes(
+            original_coords_array, final_added_candidates, source_idx, terminal_indices, names
+        )
+
+        final_mst, final_nodes = self.split_long_edges_with_coords(
             mst=best_pruned_mst,
             nodes=nodes,
             max_length_m=MAX_POLE_TO_POLE_LV,
-            min_segment_length=20.0
+            min_segment_length=15.0
         )
 
-        return best_pruned_mst, nodes, current_coords
+        if self.request.debug >= 1:
+            self._plot_current_tree(final_nodes, final_mst,
+                                    title="Final Tree After Drop + Splitting",
+                                    added_points=None)
+
+        final_coords = (np.vstack([original_coords_array, final_added_candidates])
+                        if len(final_added_candidates) > 0 else original_coords_array)
+
+        return final_mst, final_nodes, final_coords

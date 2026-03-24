@@ -32,11 +32,11 @@ req = SolverRequest(
     params={"n": 2},
     points=coords,
     costs={
-        "poleCost": 100.0,
-        "lowVoltageCostPerMeter": 10.0,
-        "highVoltageCostPerMeter": 20.0,
+        "poleCost": 1000.0,
+        "lowVoltageCostPerMeter": 100.0,
+        "highVoltageCostPerMeter": 40.0,
     },
-    debug=0,
+    debug=1,
 )
 
 solvers = {"solvers": []}

@@ -198,6 +198,7 @@ export default function DemoPage() {
 
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [allowDragTerminals, setAllowDragTerminals] = useState(false);
 
   const [solvers, setSolvers] = useState<Solvers[]>([]);
   const [selectedSolverName, setSelectedSolverName] = useState<string>(
@@ -344,8 +345,8 @@ export default function DemoPage() {
     });
 
     // drag
-    // drag
-    // drag
+    // Inside marker.addListener('drag', () => { ... })
+
     marker.addListener('drag', () => {
       const current = toLiteral(marker.position);
       if (!current) return;
@@ -359,7 +360,12 @@ export default function DemoPage() {
 
       let exceedsLimit = false;
 
-      // 1. Check if the NEW position exceeds 30m for ANY attached line
+      // Determine if this marker is a pole or terminal
+      const isPole = point.type === 'pole';
+
+      // NEW LOGIC: Only enforce 30m limit on terminals when allowDragTerminals = false
+      const shouldEnforceLimit = !isPole && !allowDragTerminals;
+
       polylinesRef.current.forEach((line) => {
         const path = line.getPath();
         if (path.getLength() !== 2) return;
@@ -374,21 +380,21 @@ export default function DemoPage() {
           Math.abs(end.lat() - prevLat) < 1e-9 &&
           Math.abs(end.lng() - prevLng) < 1e-9;
 
-        if (isStart) {
-          if (
-            haversineDistance(targetLat, targetLng, end.lat(), end.lng()) > 30
-          )
-            exceedsLimit = true;
-        } else if (isEnd) {
-          if (
-            haversineDistance(start.lat(), start.lng(), targetLat, targetLng) >
-            30
-          )
-            exceedsLimit = true;
+        if (isStart || isEnd) {
+          const otherLat = isStart ? end.lat() : start.lat();
+          const otherLng = isStart ? end.lng() : start.lng();
+
+          if (shouldEnforceLimit) {
+            if (
+              haversineDistance(targetLat, targetLng, otherLat, otherLng) > 30
+            ) {
+              exceedsLimit = true;
+            }
+          }
         }
       });
 
-      // 2. Lock coordinates to the last valid position if limit is exceeded
+      // Lock position if limit exceeded (only for terminals when checkbox is OFF)
       if (exceedsLimit) {
         targetLat = prevLat;
         targetLng = prevLng;
@@ -1271,6 +1277,8 @@ export default function DemoPage() {
       grandTotal: 0,
     }); // ← clear previous breakdown
     setCalcError(null);
+
+    setAllowDragTerminals(false);
 
     const backendUrl =
       process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/solve';
@@ -2466,6 +2474,28 @@ export default function DemoPage() {
                   >
                     Use existing poles in calculation ({poleCount} poles
                     detected)
+                  </label>
+                </div>
+              )}
+
+              {miniGridNodes.length > 0 && (
+                <div className='mt-4 flex items-center gap-3 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-4'>
+                  <input
+                    type='checkbox'
+                    id='allow-drag-terminals'
+                    checked={allowDragTerminals}
+                    onChange={(e) => setAllowDragTerminals(e.target.checked)}
+                    className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
+                  />
+                  <label
+                    htmlFor='allow-drag-terminals'
+                    className='cursor-pointer text-sm font-medium text-zinc-300'
+                  >
+                    Allow dragging of{' '}
+                    <span className='font-semibold text-blue-400'>
+                      Terminals
+                    </span>{' '}
+                    (Poles can always be dragged)
                   </label>
                 </div>
               )}

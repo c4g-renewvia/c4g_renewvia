@@ -35,17 +35,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
     @staticmethod
     def get_input_params():
-        return [
-            {
-                "name": "n",
-                "type": "integer",
-                "default": 1,
-                "min": 1,
-                "max": 3,
-                "description": "Maximum Number of greedy candidates to evaluate per iteration."
-
-            }
-        ]
+        return []
 
     def generate_projection_candidates(
             self,

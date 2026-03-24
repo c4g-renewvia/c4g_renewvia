@@ -342,28 +342,28 @@ export default function DemoPage() {
       }
     });
 
-    // drag
-    // Inside marker.addListener('drag', () => { ... })
-
     marker.addListener('drag', () => {
-      const current = toLiteral(marker.position);
-      if (!current) return;
-
-      let targetLat = current.lat;
-      let targetLng = current.lng;
-
+      const currentPos = toLiteral(marker.position);
       const prevStr = markerDragRef.current;
-      if (!prevStr) return;
+      if (!currentPos || !prevStr) return;
+
       const [prevLat, prevLng] = prevStr.split(',').map(Number);
-
-      let exceedsLimit = false;
-
-      // Determine if this marker is a pole or terminal
       const isPole = point.type === 'pole';
 
-      // NEW LOGIC: Only enforce 30m limit on terminals when allowDragTerminals = false
-      const shouldEnforceLimit = !isPole && !allowDragTerminals;
+      // 1. RULE: Terminals can only move if allowDragTerminals is true
+      // We use the Ref version of the state if you have one, or ensure this
+      // function is recreated when allowDragTerminals changes.
+      if (!isPole && !allowDragTerminals) {
+        marker.position = { lat: prevLat, lng: prevLng };
+        return;
+      }
 
+      let exceedsLimit = false;
+      const targetLat = currentPos.lat;
+      const targetLng = currentPos.lng;
+
+      // 2. RULE: No edge can exceed 30m
+      // We check every polyline connected to this specific marker
       polylinesRef.current.forEach((line) => {
         const path = line.getPath();
         if (path.getLength() !== 2) return;
@@ -371,6 +371,7 @@ export default function DemoPage() {
         const start = path.getAt(0);
         const end = path.getAt(1);
 
+        // Identify if this line is attached to the marker we are dragging
         const isStart =
           Math.abs(start.lat() - prevLat) < 1e-9 &&
           Math.abs(start.lng() - prevLng) < 1e-9;
@@ -379,108 +380,85 @@ export default function DemoPage() {
           Math.abs(end.lng() - prevLng) < 1e-9;
 
         if (isStart || isEnd) {
-          const otherLat = isStart ? end.lat() : start.lat();
-          const otherLng = isStart ? end.lng() : start.lng();
+          const otherNode = isStart ? end : start;
+          const distance = haversineDistance(
+            targetLat,
+            targetLng,
+            otherNode.lat(),
+            otherNode.lng()
+          );
 
-          if (shouldEnforceLimit) {
-            if (
-              haversineDistance(targetLat, targetLng, otherLat, otherLng) > 30
-            ) {
-              exceedsLimit = true;
-            }
+          if (distance > 30) {
+            exceedsLimit = true;
           }
         }
       });
 
-      // Lock position if limit exceeded (only for terminals when checkbox is OFF)
+      // 3. ENFORCEMENT: If any rule is broken, snap back and EXIT
       if (exceedsLimit) {
-        targetLat = prevLat;
-        targetLng = prevLng;
-        marker.position = { lat: targetLat, lng: targetLng };
+        marker.position = { lat: prevLat, lng: prevLng };
+        return;
       }
 
-      // 3. Update the lines using targetLat/targetLng so they NEVER detach
-      const diff = { lowVoltageMeters: 0, highVoltageMeters: 0 };
+      // 4. UPDATE VISUALS: If rules are passed, move the lines and update costs
+      const costDiff = { low: 0, high: 0 };
 
       polylinesRef.current.forEach((line) => {
         const path = line.getPath();
-        if (path.getLength() !== 2) return;
-
         const start = path.getAt(0);
         const end = path.getAt(1);
-
-        const startLat = start.lat();
-        const startLng = start.lng();
-        const endLat = end.lat();
-        const endLng = end.lng();
-
-        let changed = false;
-        let prevDist = 0;
-
         const lineType =
           line.get('strokeColor') === lowVoltageColor ? 'low' : 'high';
 
-        // Check which end of the line we are holding
+        let isMatched = false;
+        const oldDist = haversineDistance(
+          start.lat(),
+          start.lng(),
+          end.lat(),
+          end.lng()
+        );
+
         if (
-          Math.abs(startLat - prevLat) < 1e-9 &&
-          Math.abs(startLng - prevLng) < 1e-9
+          Math.abs(start.lat() - prevLat) < 1e-9 &&
+          Math.abs(start.lng() - prevLng) < 1e-9
         ) {
-          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
-          line.setPath([
-            { lat: targetLat, lng: targetLng },
-            { lat: endLat, lng: endLng },
-          ]);
-          changed = true;
+          line.setPath([{ lat: targetLat, lng: targetLng }, end]);
+          isMatched = true;
         } else if (
-          Math.abs(endLat - prevLat) < 1e-9 &&
-          Math.abs(endLng - prevLng) < 1e-9
+          Math.abs(end.lat() - prevLat) < 1e-9 &&
+          Math.abs(end.lng() - prevLng) < 1e-9
         ) {
-          prevDist = haversineDistance(startLat, startLng, endLat, endLng);
-          line.setPath([
-            { lat: startLat, lng: startLng },
-            { lat: targetLat, lng: targetLng },
-          ]);
-          changed = true;
+          line.setPath([start, { lat: targetLat, lng: targetLng }]);
+          isMatched = true;
         }
 
-        // Only accumulate cost differences if it was a valid move
-        if (changed && !exceedsLimit) {
+        if (isMatched) {
           const newDist = haversineDistance(
             line.getPath().getAt(0).lat(),
             line.getPath().getAt(0).lng(),
             line.getPath().getAt(1).lat(),
             line.getPath().getAt(1).lng()
           );
-          if (lineType === 'low') {
-            diff.lowVoltageMeters += newDist - prevDist;
-          } else {
-            diff.highVoltageMeters += newDist - prevDist;
-          }
+          costDiff[lineType] += newDist - oldDist;
         }
       });
 
-      // 4. Update the tracker and cost state ONLY if the move was valid
-      if (!exceedsLimit) {
-        setCostBreakdown((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            lowVoltageMeters: prev.lowVoltageMeters + diff.lowVoltageMeters,
-            highVoltageMeters: prev.highVoltageMeters + diff.highVoltageMeters,
-            totalMeters:
-              prev.totalMeters + diff.lowVoltageMeters + diff.highVoltageMeters,
-            wireCost:
-              prev.wireCost +
-              diff.lowVoltageMeters * lowVoltageCost +
-              diff.highVoltageMeters * highVoltageCost,
-            grandTotal:
-              prev.grandTotal +
-              diff.lowVoltageMeters * lowVoltageCost +
-              diff.highVoltageMeters * highVoltageCost,
-          };
-        });
-        markerDragRef.current = `${targetLat},${targetLng}`;
-      }
+      // 5. UPDATE STATE: Apply cost changes to the UI
+      setCostBreakdown((prev) => {
+        const addedWireCost =
+          costDiff.low * lowVoltageCost + costDiff.high * highVoltageCost;
+        return {
+          ...prev,
+          lowVoltageMeters: prev.lowVoltageMeters + costDiff.low,
+          highVoltageMeters: prev.highVoltageMeters + costDiff.high,
+          totalMeters: prev.totalMeters + costDiff.low + costDiff.high,
+          wireCost: prev.wireCost + addedWireCost,
+          grandTotal: prev.grandTotal + addedWireCost,
+        };
+      });
+
+      // Update the reference for the next 'drag' tick
+      markerDragRef.current = `${targetLat},${targetLng}`;
     });
 
     // 5. Enforce final snap back when the user lets go of the mouse

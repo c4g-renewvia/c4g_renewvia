@@ -143,6 +143,52 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return cluster_centers
 
+    def generate_adaptive_fermat_candidates(
+            self,
+            current_coords: np.ndarray,
+            terminal_indices: List[int],
+            pole_indices: List[int],
+            max_distance: float = 60.0
+    ) -> np.ndarray:
+        """
+        Generates Fermat points for triplets consisting of:
+        - 1 existing pole + 2 terminals
+        - 2 existing poles + 1 terminal
+        """
+        candidates = []
+
+        # Iterate through each existing pole to see if it can 'bridge' nearby terminals
+        for p_idx in pole_indices:
+            pole_coord = current_coords[p_idx]
+
+            # Find terminals within reach of this specific pole
+            nearby_terminals = [
+                t_idx for t_idx in terminal_indices
+                if self.haversine_meters(pole_coord[0], pole_coord[1],
+                                         current_coords[t_idx][0], current_coords[t_idx][1]) <= max_distance
+            ]
+
+            # If we have at least 2 nearby terminals, try forming a Steiner junction
+            if len(nearby_terminals) >= 2:
+                for i, j in itertools.combinations(nearby_terminals, 2):
+                    pts = np.array([
+                        pole_coord,
+                        current_coords[i],
+                        current_coords[j]
+                    ])
+
+                    st_pt = self.fermat_torricelli_point(pts)
+                    candidates.append(st_pt)
+
+        if not candidates:
+            return np.empty((0, 2))
+
+        # Filter by minimum separation from existing points to avoid redundancy
+        candidates_array = np.array(candidates)
+        mask = (self.haversine_vec(candidates_array, current_coords) >= 10.0).all(axis=1)
+
+        return np.unique(np.round(candidates_array[mask], decimals=6), axis=0)
+
     def generate_proximity_fermat_candidates(
             self,
             coords: np.ndarray,
@@ -244,6 +290,20 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         # candidates = np.empty((0, 2))
         candidates = np.concatenate([voronoi_candidates, fermat_candidates], axis=0)
 
+        n_terminals = len(self._terminal_indices) + 1  # +1 for source
+        pole_indices = list(range(n_terminals, len(coords)))
+        terminal_indices = list(range(n_terminals))
+        adaptive_fermat = self.generate_adaptive_fermat_candidates(
+            np.array(coords),
+            terminal_indices,
+            pole_indices
+        )
+
+        if len(adaptive_fermat) > 0:
+            # Filter by bounding box as you do for other candidates
+            adaptive_fermat = mask_outside_terminal_bb(coords, adaptive_fermat)
+            candidates = np.concatenate([candidates, adaptive_fermat], axis=0)
+
         if cur_edges is not None:
             collinear_candidates = self.generate_collinear_candidates(np.array(coords),
                                                                       cur_edges,
@@ -301,12 +361,71 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                        label='Projection Candidates')
             ax.scatter(terminal_cluster_centers[:, 1], terminal_cluster_centers[:, 0], s=100, marker='o',
                        label='Cluster Candidates')
+            ax.scatter(adaptive_fermat[:, 1], adaptive_fermat[:, 0], s=100, marker='o', label='Adaptive Fermat Candidates')
             ax.scatter(coords[:, 1], coords[:, 0], c='black', s=100, marker='o', label='Existing Points')
             ax.legend(fontsize=9)
             ax.grid(True, alpha=0.3)
             plt.show()
 
         return candidates
+
+    def _evaluate_rollout(self, current_coords, current_names, candidate, depth=1):
+        """
+        Simulates 'depth' additional greedy steps to see the long-term potential of a candidate.
+        """
+        # 1. Setup temporary state with the candidate
+        temp_coords = np.vstack([current_coords, candidate])
+        temp_names = current_names + ['pole']
+
+        # Initialize best_future_cost with the cost of the INITIAL candidate step
+        # This ensures we always have a value to return if look-ahead fails.
+        trial_nodes = self._build_nodes(current_coords, [candidate],
+                                        self._source_idx, self._terminal_indices, temp_names)
+        dg_init = self.build_directed_graph_for_arborescence(
+            self._source_idx, self._terminal_indices,
+            [n.index for n in trial_nodes if n.type == "pole"],
+            self.compute_distance_matrix(temp_coords)
+        )
+        arbo_init = nx.minimum_spanning_arborescence(dg_init, attr="weight", default=1e18)
+        best_future_cost = self._compute_total_cost(arbo_init, self._source_idx)
+
+        # 2. Perform depth-limited look-ahead
+        for d in range(depth):
+            # Using proximity fermat for fast look-ahead as suggested in iteration logs
+            look_ahead_cands = self.generate_proximity_fermat_candidates(temp_coords, max_candidates=10)
+
+            if len(look_ahead_cands) == 0:
+                break
+
+            best_step_cand = None
+            # We try to improve the best_future_cost within this specific depth step
+
+            for fc in look_ahead_cands:
+                f_coords = np.vstack([temp_coords, fc])
+                # We must pass the original base coords and the full set of added poles (candidate + fc)
+                f_nodes = self._build_nodes(current_coords, np.vstack([candidate, fc]),
+                                            self._source_idx, self._terminal_indices, temp_names + ['pole'])
+
+                dg = self.build_directed_graph_for_arborescence(
+                    self._source_idx, self._terminal_indices,
+                    [n.index for n in f_nodes if n.type == "pole"],
+                    self.compute_distance_matrix(f_coords)
+                )
+                arbo = nx.minimum_spanning_arborescence(dg, attr="weight", default=1e18)
+                cost = self._compute_total_cost(arbo, self._source_idx)
+
+                if cost < best_future_cost:
+                    best_future_cost = cost
+                    best_step_cand = fc
+
+            if best_step_cand is not None:
+                temp_coords = np.vstack([temp_coords, best_step_cand])
+                temp_names.append('pole')
+            else:
+                # No further improvement found at this depth
+                break
+
+        return best_future_cost
 
     def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
         """
@@ -332,107 +451,123 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         """
         nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
-        current_coords = list(coords)
+        # Initial state tracking
+        current_coords = np.array(coords)
         current_names = list(names)
         added_candidates = np.empty((0, 2), dtype=float)
+
+        # Constants for Beam Search and Rollout
+        BEAM_WIDTH = 3  # Evaluate top 3 immediate candidates deeper
+        ROLLOUT_DEPTH = 2  # Look ahead 1 step beyond the current choice
+        MAX_STAGNATION = 3
+        IMPROVEMENT_THRESHOLD = 0.05  # Minimum meters to keep iterating
+
         iteration = 0
         stagnation_counter = 0
-        MAX_STAGNATION = 3
-        IMPROVEMENT_THRESHOLD = 2.0  # meters — you can make it 1.0 or 5.0
-
         cur_total_weight = np.inf
-        cur_edges = None
-        best_nodes = None
-        best_pruned_mst = None
 
+        # Persist the best state found
+        best_nodes = nodes
+        best_pruned_mst = None
+        cur_edges = None
+
+        # 1. Initial Cluster Center Generation
         terminal_cluster_centers = self.generate_cluster_center_candidates(
-            np.array(coords), min_clusters=2, max_clusters=12, n_init=5)
+            current_coords, min_clusters=2, max_clusters=12, n_init=5
+        )
 
         while True:
             iteration += 1
             if self.request.debug >= 1:
-                print(f"\nIteration {iteration} (stagnation: {stagnation_counter}/{MAX_STAGNATION})")
+                print(f"\n--- Iteration {iteration} (Stagnation: {stagnation_counter}/{MAX_STAGNATION}) ---")
 
+            # 2. Generate candidates (including Adaptive Fermat and Projections)
             candidates = self.generate_candidates(
-                np.array(current_coords), cur_edges, terminal_cluster_centers,
-                added_candidates, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3)
+                current_coords, cur_edges, terminal_cluster_centers,
+                added_candidates, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3
+            )
 
             if len(candidates) == 0:
-                print("No candidates found")
+                if self.request.debug: print("No more candidates to evaluate.")
                 break
 
-            best_cost = np.inf
-            best_max_edge = 0
-            best_candidates = None
-            best_pruned_mst = None
-            best_nodes = None
-            best_edges = None
+            # --- STEP 1: IMMEDIATE FILTERING (The "Beam" Selection) ---
+            immediate_results = []
+            for cand in candidates:
+                trial_coords = np.vstack([current_coords, cand])
+                trial_names = current_names + ['pole']
 
-            # Evaluate combinations
-            for k in range(1, self.n + 1):
-                for cands_tup in itertools.combinations(candidates, k):
-                    cands = np.array(cands_tup)
-                    trial_coords = np.vstack([current_coords, cands])
-                    trial_names = current_names + ['pole'] * len(cands)
+                # Construct temporary nodes for this specific candidate
+                trial_nodes = self._build_nodes(current_coords, [cand], source_idx, terminal_indices, trial_names)
+                trial_dist_matrix = self.compute_distance_matrix(trial_coords)
+                pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
-                    trial_nodes = self._build_nodes(np.array(current_coords), cands,
-                                                    source_idx, terminal_indices, trial_names)
-                    trial_dist_matrix = self.compute_distance_matrix(trial_coords)
-                    pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
+                # Build graph and solve for immediate cost
+                DG = self.build_directed_graph_for_arborescence(
+                    source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix
+                )
+                arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
+                pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-                    DG = self.build_directed_graph_for_arborescence(
-                        source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix)
-                    arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-                    pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
+                imm_cost = self._compute_total_cost(pruned, source_idx)
+                immediate_results.append({
+                    "cost": imm_cost,
+                    "cand": cand,
+                    "graph": pruned,
+                    "nodes": trial_nodes
+                })
 
-                    total_cost = self._compute_total_cost(pruned, source_idx)
+            # Sort by cost and take the top candidates for the Beam
+            immediate_results.sort(key=lambda x: x["cost"])
+            beam = immediate_results[:BEAM_WIDTH]
 
-                    if total_cost < best_cost:
-                        best_cost = total_cost
-                        best_max_edge = max((pruned.get_edge_data(*e)["length"] for e in pruned.edges()), default=0)
-                        best_candidates = cands
-                        best_pruned_mst = pruned
-                        best_nodes = trial_nodes
-                        best_edges = list(pruned.edges())
+            # --- STEP 2: ROLLOUT EVALUATION ---
+            best_rollout_score = np.inf
+            winner = None
 
-            # === NEW STAGNATION LOGIC ===
-            if best_cost > cur_total_weight + IMPROVEMENT_THRESHOLD:
-                if self.request.debug >= 1:
-                    print("No meaningful improvement found → stopping")
-                break
+            for item in beam:
+                # Look into the future for this specific candidate
+                rollout_score = self._evaluate_rollout(
+                    current_coords, current_names, item["cand"], depth=ROLLOUT_DEPTH
+                )
 
-            # Accept even if same cost (but count stagnation)
-            if abs(best_cost - cur_total_weight) < 0.01:  # essentially same cost
+                if rollout_score < best_rollout_score:
+                    best_rollout_score = rollout_score
+                    winner = item
+
+            # --- STEP 3: SELECTION & STAGNATION CHECK ---
+            if winner is None: break
+
+            improvement = cur_total_weight - winner["cost"]
+
+            if improvement < IMPROVEMENT_THRESHOLD:
                 stagnation_counter += 1
+                if self.request.debug: print(f"Stagnating: improvement of {improvement:.4f}m is below threshold.")
             else:
                 stagnation_counter = 0
 
             if stagnation_counter >= MAX_STAGNATION:
-                if self.request.debug >= 1:
-                    print(f"Stagnated for {MAX_STAGNATION} iterations → stopping")
+                if self.request.debug: print("Stopping due to stagnation.")
                 break
 
-            # Accept the winner
+            # --- STEP 4: COMMIT WINNER ---
             if self.request.debug >= 1:
-                delta = best_cost - cur_total_weight
-                print(f"→ Adding {best_candidates} → new length: {best_cost:.2f} m (Δ {delta:+.2f} m)")
+                print(
+                    f"Winner selected via Rollout: Imm Cost: {winner['cost']:.2f} | Rollout Potential: {best_rollout_score:.2f}")
 
-            added_candidates = np.vstack([added_candidates, best_candidates])
-            current_coords = np.vstack([current_coords, best_candidates])
-            current_names = current_names + ['pole'] * len(best_candidates)
+            added_candidates = np.vstack([added_candidates, winner["cand"]])
+            current_coords = np.vstack([current_coords, winner["cand"]])
+            current_names.append('pole')
 
-            cur_total_weight = best_cost
-            cur_edges = best_edges
+            cur_total_weight = winner["cost"]
+            best_pruned_mst = winner["graph"]
+            best_nodes = winner["nodes"]
+            cur_edges = list(best_pruned_mst.edges())
 
-            # Refresh clusters occasionally
-            if iteration % 3 == 0:
-                terminal_cluster_centers = self.generate_cluster_center_candidates(
-                    np.array(current_coords), min_clusters=2, max_clusters=12, n_init=5)
-
+            # Visualization for debugging
             if self.request.debug >= 1:
-                self._plot_current_tree(best_nodes, best_pruned_mst,
-                                        added_points=best_candidates,
-                                        title=f"Iteration {iteration} – Added pole (Δ {delta:+.1f} m)")
+                self._plot_current_tree(best_nodes, best_pruned_mst, added_points=[winner["cand"]],
+                                        title=f"Iteration {iteration} (Δ {improvement:+.2f} m)")
 
 
         # ==========================================

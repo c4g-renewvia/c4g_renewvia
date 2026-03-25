@@ -181,13 +181,23 @@ export default function DemoPage() {
 
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [allowDragTerminals, setAllowDragTerminals] = useState(false);
+  const [allowDragTerminals, setAllowDragTerminals] = useState(true);
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >({
     locations: false,
     costs: false,
     export: false,
+  });
+
+  const [isAddPointDialogOpen, setIsAddPointDialogOpen] = useState(false);
+  const [pendingPoint, setPendingPoint] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [newPointDetails, setNewPointDetails] = useState({
+    name: '',
+    type: 'terminal' as 'source' | 'terminal',
   });
 
   const toggleSection = (section: string) => {
@@ -516,7 +526,7 @@ export default function DemoPage() {
     [allowDragTerminals, lowVoltageCost, highVoltageCost, poleCount]
   );
 
-  const [sidebarWidth, setSidebarWidth] = useState(420); // default width
+  const [sidebarWidth, setSidebarWidth] = useState(500); // default width
 
   const [isResizing, setIsResizing] = useState(false);
 
@@ -542,6 +552,34 @@ export default function DemoPage() {
     document.body.style.cursor = 'default';
     document.body.style.userSelect = '';
   };
+
+  useEffect(() => {
+    if (!map) return;
+
+    const listener = map.addListener(
+      'click',
+      (e: google.maps.MapMouseEvent) => {
+        if (e.latLng) {
+          const lat = e.latLng.lat();
+          const lng = e.latLng.lng();
+
+          // Calculate default name: Terminal + (current terminals + 1)
+          const terminalCount = dataPoints.filter(
+            (p) => p.type === 'terminal'
+          ).length;
+
+          setPendingPoint({ lat, lng });
+          setNewPointDetails({
+            name: `Terminal ${String(terminalCount + 1).padStart(2, '0')}`,
+            type: 'terminal',
+          });
+          setIsAddPointDialogOpen(true);
+        }
+      }
+    );
+
+    return () => google.maps.event.removeListener(listener);
+  }, [map, dataPoints]);
 
   useEffect(() => {
     if (isResizing) {
@@ -698,6 +736,34 @@ export default function DemoPage() {
 
     setParamValues(initialValues);
   }, [selectedSolver, selectedSolverName]);
+
+  const handleConfirmNewPoint = () => {
+    if (!pendingPoint) return;
+
+    const newLocation: LocationPoint = {
+      name: newPointDetails.name,
+      type: newPointDetails.type,
+      lat: pendingPoint.lat,
+      lng: pendingPoint.lng,
+    };
+
+    // 1. Update the raw input data (for future solver runs)
+    setDataPoints((prev) => [...prev, newLocation]);
+
+    // 2. Merge into the active display nodes (so it shows up immediately)
+    // We give it an index based on the current length to avoid conflicts
+    setMiniGridNodes((prev) => {
+      const newNode: MiniGridNode = {
+        ...newLocation,
+        index: prev.length,
+      };
+      return [...prev, newNode];
+    });
+
+    // 3. Reset UI state
+    setIsAddPointDialogOpen(false);
+    setPendingPoint(null);
+  };
 
   const handleAddManualPoint = (e: React.FormEvent) => {
     e.preventDefault();
@@ -899,6 +965,9 @@ export default function DemoPage() {
     if (!file) return;
 
     processFile(file);
+    setAllowDragTerminals(true);
+    toggleSection('locations'); // auto-close
+    toggleSection('costs'); // auto-open
   };
 
   const processFile = (file: File) => {
@@ -1113,6 +1182,7 @@ export default function DemoPage() {
     setError(null);
     setFileName(null);
     setDataPoints([]);
+    setAllowDragTerminals(true);
 
     // Generate random points within a 100 square mile area
     // 100 square miles is roughly 10 miles x 10 miles
@@ -1169,6 +1239,8 @@ export default function DemoPage() {
     }
     setOriginalDataPoints(points);
     setDataPoints(points);
+    toggleSection('locations'); // auto-close
+    toggleSection('costs'); // auto-open
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1251,6 +1323,7 @@ export default function DemoPage() {
   };
 
   const handleRunSolver = async () => {
+    toggleSection('costs');
     let pointsToSend: LocationPoint[];
 
     console.log('Running solver with dataPoints:', dataPoints);
@@ -1413,6 +1486,8 @@ export default function DemoPage() {
     } finally {
       setComputingMiniGrid(false);
     }
+    setAllowDragTerminals(false);
+    toggleSection('export');
   };
 
   const generateRandomCosts = () => {
@@ -1816,14 +1891,6 @@ export default function DemoPage() {
           </svg>
         )}
       </button>
-
-      {/* 3. Global Backdrop Overlay */}
-      {sidebarOpen && (
-        <div
-          className='fixed inset-0 z-30 transition-opacity'
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
 
       {/* MAIN CONTAINER - Full Screen Map */}
       <div className='relative h-full overflow-hidden pt-16'>
@@ -2354,6 +2421,7 @@ export default function DemoPage() {
                           onChange={(e) =>
                             setHighVoltageCost(parseFloat(e.target.value))
                           }
+                          disabled
                           className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
                         />
                       </div>
@@ -2475,30 +2543,6 @@ export default function DemoPage() {
                         </div>
                       )}
 
-                      {miniGridNodes.length > 0 && (
-                        <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
-                          <input
-                            type='checkbox'
-                            id='allow-drag-terminals'
-                            checked={allowDragTerminals}
-                            onChange={(e) =>
-                              setAllowDragTerminals(e.target.checked)
-                            }
-                            className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
-                          />
-                          <label
-                            htmlFor='allow-drag-terminals'
-                            className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                          >
-                            Allow dragging of{' '}
-                            <span className='font-semibold text-blue-400'>
-                              Terminals
-                            </span>{' '}
-                            (Poles can always be dragged)
-                          </label>
-                        </div>
-                      )}
-
                       {/* Run Button */}
                       <div className='mt-auto pt-4'>
                         <button
@@ -2568,6 +2612,30 @@ export default function DemoPage() {
 
                 {expandedSections.export && (
                   <div className='space-y-4'>
+                    {miniGridNodes.length > 0 && (
+                      <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
+                        <input
+                          type='checkbox'
+                          id='allow-drag-terminals'
+                          checked={allowDragTerminals}
+                          onChange={(e) =>
+                            setAllowDragTerminals(e.target.checked)
+                          }
+                          className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
+                        />
+                        <label
+                          htmlFor='allow-drag-terminals'
+                          className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
+                        >
+                          Allow dragging of{' '}
+                          <span className='font-semibold text-blue-400'>
+                            Terminals
+                          </span>{' '}
+                          (Poles can always be dragged)
+                        </label>
+                      </div>
+                    )}
+
                     {solverOriginalCost > 0 && (
                       <div className='rounded-2xl border border-purple-500/30 bg-purple-900/20 p-6 text-center'>
                         <p className='text-xs font-bold tracking-widest text-purple-400 uppercase'>
@@ -2659,29 +2727,29 @@ export default function DemoPage() {
               </section>
             </div>
           </div>
-
-          {/* Floating Reset Button - Clean positioning */}
-          <button
-            onClick={handleResetMap}
-            disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
-            className='fixed right-15 bottom-6 z-50 flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl hover:bg-red-600 disabled:opacity-50 dark:text-white'
-          >
-            <svg
-              className='h-4 w-4'
-              fill='none'
-              stroke='currentColor'
-              viewBox='0 0 24 24'
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                strokeWidth={2}
-                d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
-              />
-            </svg>
-            Reset
-          </button>
         </div>
+
+        {/* Floating Reset Button - Clean positioning */}
+        <button
+          onClick={handleResetMap}
+          disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
+          className='fixed right-15 bottom-6 z-50 flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl hover:bg-red-600 disabled:opacity-50 dark:text-white'
+        >
+          <svg
+            className='h-4 w-4'
+            fill='none'
+            stroke='currentColor'
+            viewBox='0 0 24 24'
+          >
+            <path
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              strokeWidth={2}
+              d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
+            />
+          </svg>
+          Reset
+        </button>
 
         {/* FOOTER - Minimal */}
         <footer className='border-t border-zinc-800 bg-zinc-950 py-4 text-center text-xs text-zinc-600'>
@@ -2694,6 +2762,65 @@ export default function DemoPage() {
           onLoad={initMap}
         />
       </div>
+      {/* Dialog for adding a point via map click */}
+      <Dialog
+        open={isAddPointDialogOpen}
+        onOpenChange={setIsAddPointDialogOpen}
+      >
+        <DialogContent className='border-zinc-800 bg-zinc-900 text-white sm:max-w-[425px]'>
+          <DialogHeader>
+            <DialogTitle>Add New Point</DialogTitle>
+            <DialogDescription className='text-zinc-400'>
+              Set the details for the location you just clicked.
+            </DialogDescription>
+          </DialogHeader>
+          <div className='grid gap-4 py-4'>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <label className='text-right text-sm'>Name</label>
+              <input
+                value={newPointDetails.name}
+                onChange={(e) =>
+                  setNewPointDetails({
+                    ...newPointDetails,
+                    name: e.target.value,
+                  })
+                }
+                className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <label className='text-right text-sm'>Type</label>
+              <select
+                value={newPointDetails.type}
+                onChange={(e) =>
+                  setNewPointDetails({
+                    ...newPointDetails,
+                    type: e.target.value as 'source' | 'terminal',
+                  })
+                }
+                className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
+              >
+                <option value='terminal'>Terminal</option>
+                <option value='source'>Source</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setIsAddPointDialogOpen(false)}
+              className='px-4 py-2 text-sm text-zinc-400 hover:text-white'
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmNewPoint}
+              className='rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-700'
+            >
+              Add Point
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

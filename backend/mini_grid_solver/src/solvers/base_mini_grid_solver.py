@@ -288,7 +288,18 @@ class BaseMiniGridSolver(ABC):
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
-    def _solve(self, input_tuple) -> Tuple[nx.Graph, list[Node], np.ndarray]:
+    def _solve(self, input_tuple) -> Tuple[Union[nx.DiGraph, nx.Graph], list[Node], np.ndarray]:
+        """
+        Abstract method to be implemented by subclasses.
+        Solves the given input data and returns the resulting graph, list of nodes, and an array of results.
+
+        :param input_tuple: The input data containing necessary information to process the solution. The
+            structure and data type of the input must align with the expected requirements of the solution.
+        :return: A tuple containing three elements:
+            - A ``nx.Graph`` object representing the computed graph.
+            - A list of ``Node`` objects signifying the relevant nodes in the graph.
+            - A ``numpy.ndarray`` containing the results associated with the processed input data.
+        """
         pass
 
 
@@ -395,7 +406,7 @@ class BaseMiniGridSolver(ABC):
 
         return self._nodes, self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
-    def calc_edge_weight(self, length, voltage="low", pole=True):
+    def calc_edge_weight(self, length, voltage="low"):
         """
         Cost of wire and pole
         Args:
@@ -408,25 +419,28 @@ class BaseMiniGridSolver(ABC):
         """
         low_voltage_cost = self.request.costs.get(f"{voltage}VoltageCostPerMeter", 10.0)
         pole_cost = self.request.costs.get("poleCost", 10.0)
+
+        # Cost of the wire
         weight = length * low_voltage_cost
 
+        # Cost of intermediate support poles for long spans
         extra_poles = max(0, math.ceil(length / MAX_POLE_TO_POLE_LV) - 1)
         weight += extra_poles * pole_cost
 
-        if pole:
-            weight += pole_cost
-
         return weight
 
-    def _compute_total_cost(self, graph, source_idx):
-        total_cost = 0.0
-        for u, v, d in graph.edges(data=True):
-            length = d.get("length", 0.0)
-            voltage = d.get("voltage", "low")
-            pole_on_edge = (u != source_idx)  # pole at the "from" node for most cases
-            total_cost += self.calc_edge_weight(length, voltage=voltage, pole=pole_on_edge)
+    def _compute_total_cost(self, graph, nodes):
+        # 1. Wire and span-pole costs
+        wire_cost = sum(d['weight'] for u, v, d in graph.edges(data=True))
 
-        return total_cost
+        # 2. Unique node costs
+        # Count how many nodes of type "pole" are present in the graph
+        # (Assuming you can access the node type from your nodes list via index)
+        used_indices = set(graph.nodes())
+        num_poles = sum(1 for idx in used_indices if nodes[idx].type == "pole")
+        pole_cost = self._costs.get("poleCost", 100.0)
+
+        return wire_cost + (num_poles * pole_cost)
 
     def build_directed_graph_for_arborescence(
             self,
@@ -465,8 +479,8 @@ class BaseMiniGridSolver(ABC):
             d = dist_matrix[source_idx, p]
             if 0.1 < d:
                 voltage = "low"
-                w = self.calc_edge_weight(d, voltage=voltage, pole=True)
-                DG.add_edge(source_idx, p, weight=w, length=d, )
+                w = self.calc_edge_weight(d, voltage=voltage)
+                DG.add_edge(source_idx, p, weight=w, length=d, voltage=voltage)
 
         # 2: Bidirectional pole ↔ pole (undirected spans)
         for i in range(len(pole_indices)):
@@ -474,7 +488,7 @@ class BaseMiniGridSolver(ABC):
                 p1, p2 = pole_indices[i], pole_indices[j]
                 d = dist_matrix[p1, p2]
                 voltage = "low"
-                w = self.calc_edge_weight(d, voltage=voltage, pole=True)
+                w = self.calc_edge_weight(d, voltage=voltage)
                 if 0.1 < d:
                     DG.add_edge(p1, p2, weight=w, length=d, voltage=voltage)
 
@@ -484,7 +498,7 @@ class BaseMiniGridSolver(ABC):
                 d = dist_matrix[p, h]
                 if 0.1 < d:
                     voltage = "low"
-                    w = self.calc_edge_weight(d, voltage=voltage, pole=False)
+                    w = self.calc_edge_weight(d, voltage=voltage)
                     DG.add_edge(p, h, weight=w, length=d, voltage=voltage)
 
         return DG
@@ -552,7 +566,7 @@ class BaseMiniGridSolver(ABC):
                         removed = True
         return DG
 
-    def _build_edges_and_lengths(self, graph: nx.DiGraph, nodes: List[Node]):
+    def _build_edges_and_lengths(self, graph: Union[nx.Graph, nx.DiGraph], nodes: List[Node]):
         edges = []
         low_m = high_m = 0.0
 

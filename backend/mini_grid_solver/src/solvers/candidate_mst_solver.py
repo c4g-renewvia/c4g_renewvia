@@ -213,7 +213,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                     next_index,
                     length=segment_length,
                     voltage=voltage,
-                    weight=self.calc_edge_weight(segment_length, voltage=voltage, pole=True)
+                    weight=self.calc_edge_weight(segment_length, voltage=voltage)
                 )
 
                 prev_idx = next_index
@@ -225,7 +225,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 v,
                 length=segment_length,
                 voltage=voltage,
-                weight=self.calc_edge_weight(segment_length, voltage=voltage, pole=True),
+                weight=self.calc_edge_weight(segment_length, voltage=voltage),
             )
 
         # Optional: copy graph-level attributes if any exist

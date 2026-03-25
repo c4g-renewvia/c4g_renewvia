@@ -371,8 +371,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             [n.index for n in trial_nodes if n.type == "pole"],
             self.compute_distance_matrix(temp_coords)
         )
-        arbo_init = nx.minimum_spanning_arborescence(dg_init, attr="weight", default=1e18)
-        best_future_cost = self._compute_total_cost(arbo_init, self._source_idx)
+        arbo_init = nx.minimum_spanning_arborescence(dg_init, attr="weight", default=1e18, preserve_attrs=True )
+        best_future_cost = self._compute_total_cost(arbo_init, trial_nodes)
 
         # 2. Perform depth-limited look-ahead
         for d in range(depth):
@@ -397,7 +397,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                     self.compute_distance_matrix(f_coords)
                 )
                 arbo = nx.minimum_spanning_arborescence(dg, attr="weight", default=1e18)
-                cost = self._compute_total_cost(arbo, self._source_idx)
+                cost = self._compute_total_cost(arbo, nodes=f_nodes)
 
                 if cost < best_future_cost:
                     best_future_cost = cost
@@ -494,7 +494,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
                 pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-                imm_cost = self._compute_total_cost(pruned, source_idx)
+                imm_cost = self._compute_total_cost(pruned, trial_nodes)
                 immediate_results.append({
                     "cost": imm_cost,
                     "cand": cand,
@@ -580,7 +580,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
             pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
 
-            total_cost = self._compute_total_cost(pruned, source_idx)
+            total_cost = self._compute_total_cost(pruned, trial_nodes)
 
             if total_cost <= cur_total_weight + 1e-3:   # small tolerance
                 if self.request.debug >= 1:

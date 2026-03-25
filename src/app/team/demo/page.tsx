@@ -2795,7 +2795,9 @@ export default function DemoPage() {
             </div>
 
             <p className='text-center text-xs text-zinc-500 dark:text-zinc-400'>
-              <a href={'https://forms.gle/Az6j5cjtzJJDEQAEA'}>Give Feedback</a>
+              <a href={'https://forms.gle/Az6j5cjtzJJDEQAEA'} target='_blank'>
+                Give Feedback
+              </a>
             </p>
           </div>
         </div>

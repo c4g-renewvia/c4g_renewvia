@@ -1,6 +1,6 @@
 # Mini-Grid Solver Documentation
 
-This library provides a comprehensive framework for designing and optimizing rural power distribution networks. It focuses on minimizing total project costs by balancing wire lengths and pole placements while adhering to strict geographical and physical constraints.
+This library provides a comprehensive framework for designing and optimizing rural power distribution networks. It focuses on minimizing total project solver by balancing wire lengths and pole placements while adhering to strict geographical and physical constraints.
 
 ---
 
@@ -43,7 +43,7 @@ Built on Pydantic, these models ensure type safety and structured communication:
 - **`SolverRequest`**: Captures input points (latitude/longitude), cost parameters, and solver-specific parameters.
 - **`Node`**: A unified representation of every point in the network, categorized as a `source`, `terminal`, or `pole`.
 - **`OutputEdge`**: Represents a connection between two nodes, including metadata for length and voltage levels.
-- **`SolverResult`**: The final output containing the network topology, total costs, and optional debug metrics.
+- **`SolverResult`**: The final output containing the network topology, total solver, and optional debug metrics.
 - **`Solvers`**: A registry of available optimization strategies made availiable to the front end.
 
 ### 2. Base Solver (`base_mini_grid_solver.py`)
@@ -98,7 +98,7 @@ The architecture is designed to be "HV-ready" and can be expanded using the foll
   - Assign `"high"` voltage to edges directly connected to the source or to nodes serving more than a certain number of downstream terminals.
 - **Distance-Based Upgrading**:
   - Update `build_directed_graph_for_arborescence` to evaluate both LV and HV weights for the same edge.
-  - Higher voltage costs can be applied to long-distance spans where voltage drop across LV lines would be prohibitive.
+  - Higher voltage solver can be applied to long-distance spans where voltage drop across LV lines would be prohibitive.
 - **Transformer Node Insertion**:
   - New node types can be added to the `Node` model to represent transformers where the network transitions from high to low voltage.
   -

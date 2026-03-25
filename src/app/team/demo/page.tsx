@@ -186,7 +186,7 @@ export default function DemoPage() {
     Record<string, boolean>
   >({
     locations: false,
-    costs: false,
+    solver_cost: false,
     export: false,
   });
 
@@ -197,7 +197,7 @@ export default function DemoPage() {
   } | null>(null);
   const [newPointDetails, setNewPointDetails] = useState({
     name: '',
-    type: 'terminal' as 'source' | 'terminal',
+    type: 'terminal' as 'source' | 'terminal' | 'pole',
   });
 
   const toggleSection = (section: string) => {
@@ -222,7 +222,7 @@ export default function DemoPage() {
     name: '',
     lat: '',
     lng: '',
-    type: 'terminal' as 'source' | 'terminal',
+    type: 'terminal' as 'source' | 'terminal' | 'pole',
   });
 
   const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
@@ -230,22 +230,6 @@ export default function DemoPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const { data: session } = useSession();
-
-  // ==================== MAP INITIALIZATION ====================
-  const initMap = () => {
-    if (!window.google?.maps || !mapRef.current) return;
-
-    const googleMap = new window.google.maps.Map(mapRef.current, {
-      center: { lat: 39.8283, lng: -98.5795 },
-      zoom: 4,
-      mapTypeId: 'satellite' as google.maps.MapTypeId,
-      fullscreenControl: false,
-      streetViewControl: false,
-      mapId: 'DEMO_MAP_ID',
-    });
-
-    setMap(googleMap);
-  };
 
   // ==================== MARKER & DRAG LOGIC ====================
   const createMarker = useCallback(
@@ -389,7 +373,7 @@ export default function DemoPage() {
           return;
         }
 
-        // 4. UPDATE VISUALS: If rules are passed, move the lines and update costs
+        // 4. UPDATE VISUALS: If rules are passed, move the lines and update solver
         const costDiff = { low: 0, high: 0 };
 
         polylinesRef.current.forEach((line) => {
@@ -521,6 +505,12 @@ export default function DemoPage() {
         markerDragRef.current = null;
       });
 
+      marker.addListener('contextmenu', () => {
+        if (confirm(`Delete ${point.name}?`)) {
+          handleRemovePoint(point.name);
+        }
+      });
+
       return marker;
     },
     [allowDragTerminals, lowVoltageCost, highVoltageCost, poleCount]
@@ -575,11 +565,40 @@ export default function DemoPage() {
           });
           setIsAddPointDialogOpen(true);
         }
+        setExpandedSections({
+          locations: false,
+          solver_cost: true,
+          export: false,
+        });
       }
     );
 
     return () => google.maps.event.removeListener(listener);
   }, [map, dataPoints]);
+
+  // 1. Wrap initMap in useCallback to stabilize it
+  const initMap = useCallback(() => {
+    // Only initialize if the global object exists, the ref is ready, and we haven't already set a map state
+    if (!window.google?.maps || !mapRef.current || map) return;
+
+    const googleMap = new window.google.maps.Map(mapRef.current, {
+      center: { lat: 39.8283, lng: -98.5795 },
+      zoom: 4,
+      mapTypeId: 'satellite' as google.maps.MapTypeId,
+      fullscreenControl: false,
+      streetViewControl: false,
+      mapId: 'DEMO_MAP_ID',
+    });
+
+    setMap(googleMap);
+  }, [map]);
+
+  // 2. Add this effect to catch cases where the script is already loaded (navigation back)
+  useEffect(() => {
+    if (window.google?.maps && mapRef.current && !map) {
+      initMap();
+    }
+  }, [initMap, map]);
 
   useEffect(() => {
     if (isResizing) {
@@ -736,6 +755,27 @@ export default function DemoPage() {
 
     setParamValues(initialValues);
   }, [selectedSolver, selectedSolverName]);
+
+  const handleRemovePoint = useCallback(
+    (pointName: string) => {
+      // 1. Remove from the raw input list
+      setDataPoints((prev) => prev.filter((p) => p.name !== pointName));
+
+      // 2. Remove from the active visualization (priority list)
+      setMiniGridNodes((prev) => prev.filter((n) => n.name !== pointName));
+
+      // 3. Optional: Clear edges if the grid is now "broken"
+      setMiniGridEdges((prev) =>
+        prev.filter((edge) =>
+          // Keep only edges where both ends still exist in the new node list
+          dataPoints.some(
+            (p) => p.lat === edge.start.lat && p.lng === edge.start.lng
+          )
+        )
+      );
+    },
+    [dataPoints]
+  );
 
   const handleConfirmNewPoint = () => {
     if (!pendingPoint) return;
@@ -966,8 +1006,11 @@ export default function DemoPage() {
 
     processFile(file);
     setAllowDragTerminals(true);
-    toggleSection('locations'); // auto-close
-    toggleSection('costs'); // auto-open
+    setExpandedSections({
+      locations: false,
+      solver_cost: true,
+      export: false,
+    });
   };
 
   const processFile = (file: File) => {
@@ -1058,11 +1101,11 @@ export default function DemoPage() {
             console.log('costBreakdown:', costBreakdown);
             console.log('selectedSolverName still:', selectedSolverName);
 
-            // Restore costs if present
+            // Restore solver if present
             if (parsed.costBreakdown) {
               setCostBreakdown(parsed.costBreakdown);
 
-              // Back-calculate per-unit costs (with fallback defaults)
+              // Back-calculate per-unit solver (with fallback defaults)
               const cb = parsed.costBreakdown;
 
               setPoleCost(
@@ -1239,8 +1282,11 @@ export default function DemoPage() {
     }
     setOriginalDataPoints(points);
     setDataPoints(points);
-    toggleSection('locations'); // auto-close
-    toggleSection('costs'); // auto-open
+    setExpandedSections({
+      locations: false,
+      solver_cost: true,
+      export: false,
+    });
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1323,7 +1369,6 @@ export default function DemoPage() {
   };
 
   const handleRunSolver = async () => {
-    toggleSection('costs');
     let pointsToSend: LocationPoint[];
 
     console.log('Running solver with dataPoints:', dataPoints);
@@ -1487,7 +1532,11 @@ export default function DemoPage() {
       setComputingMiniGrid(false);
     }
     setAllowDragTerminals(false);
-    toggleSection('export');
+    setExpandedSections({
+      locations: false,
+      solver_cost: false,
+      export: true,
+    });
   };
 
   const generateRandomCosts = () => {
@@ -1696,7 +1745,7 @@ export default function DemoPage() {
     console.log('Loading saved mini-grid:', run.id, run.name || '(no name)');
 
     // Log what we actually received (for debugging)
-    console.log('Saved costs:', {
+    console.log('Saved solver:', {
       poleCost: run.poleCost,
       lowVoltageCost: run.lowVoltageCost,
       highVoltageCost: run.highVoltageCost,
@@ -1738,6 +1787,11 @@ export default function DemoPage() {
     }, 300);
 
     alert(`Loaded: ${run.name || 'Mini-grid run'}`);
+    setExpandedSections({
+      locations: false,
+      solver_cost: false,
+      export: true,
+    });
   };
 
   const handleDeleteRun = async (runId: string, runName?: string) => {
@@ -1897,20 +1951,21 @@ export default function DemoPage() {
         {/* FULL-BLEED MAP - Now fills the entire screen */}
         <div ref={mapRef} className='absolute inset-0 bg-zinc-950' />
 
+        {/* Sidebar Drawer */}
         <div
           className={`fixed top-16 left-0 z-40 h-[calc(100vh-4rem)] max-w-full border-r bg-white text-zinc-900 shadow-2xl transition-transform duration-300 ease-in-out dark:bg-zinc-950 dark:text-white ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           style={{ width: `${sidebarWidth}px` }}
         >
-          {/* Resize Handle - Right edge */}
+          {/* Resize Handle */}
           <div
             className='absolute top-0 right-0 bottom-0 z-50 w-1.5 cursor-col-resize bg-zinc-300 transition-colors hover:bg-purple-500 active:bg-purple-600 dark:bg-zinc-700'
             onMouseDown={handleMouseDown}
           />
 
-          {/* Scrollable Content */}
-          <div className='h-full overflow-y-auto p-6'>
+          {/* Scrollable Content - Added pt-24 to clear the hamburger menu */}
+          <div className='h-full overflow-y-auto p-6 pt-24'>
             <div className='space-y-12'>
               {/* 1. Define Locations Section */}
               <section>
@@ -2254,7 +2309,10 @@ export default function DemoPage() {
                               onChange={(e) =>
                                 setManualPoint({
                                   ...manualPoint,
-                                  type: e.target.value as 'source' | 'terminal',
+                                  type: e.target.value as
+                                    | 'source'
+                                    | 'terminal'
+                                    | 'pole',
                                 })
                               }
                               className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-emerald-500 dark:text-white'
@@ -2352,14 +2410,14 @@ export default function DemoPage() {
               {/* 2. Costs & Solver Section - (your existing code) */}
               <section>
                 <button
-                  onClick={() => toggleSection('costs')}
+                  onClick={() => toggleSection('solver_cost')}
                   className='mb-6 flex w-full items-center justify-between rounded-2xl border border-purple-200 bg-purple-50 px-5 py-4 transition-all hover:bg-purple-100 dark:border-purple-500/30 dark:bg-purple-900/20 dark:hover:bg-purple-900/30'
                 >
                   <h2 className='text-xl font-bold text-purple-700 dark:text-purple-300'>
                     2. Costs & Solver
                   </h2>
                   <svg
-                    className={`h-5 w-5 text-purple-600 transition-transform dark:text-purple-400 ${expandedSections.costs ? 'rotate-180' : ''}`}
+                    className={`h-5 w-5 text-purple-600 transition-transform dark:text-purple-400 ${expandedSections.solver_cost ? 'rotate-180' : ''}`}
                     fill='none'
                     stroke='currentColor'
                     viewBox='0 0 24 24'
@@ -2373,7 +2431,7 @@ export default function DemoPage() {
                   </svg>
                 </button>
 
-                {expandedSections.costs && (
+                {expandedSections.solver_cost && (
                   <div className='space-y-4'>
                     <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
                       Cost Parameters

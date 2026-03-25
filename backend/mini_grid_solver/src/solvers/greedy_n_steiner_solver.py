@@ -247,6 +247,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         # 4. Deduplicate close overlapping candidates
         if len(candidates) > 0:
             candidates = np.unique(np.round(candidates, decimals=6), axis=0)
+        else:
+            candidates = np.empty((0, 2), dtype=float)
 
         if self.request.debug >= 1:
             print(f"Generated {len(candidates)} Fermat-Steiner candidates from proximity triplets "
@@ -263,22 +265,17 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         # remove candidates outside of terminal bounding box
         def mask_outside_terminal_bb(coords, cands):
-            coords_bb = self.compute_bounding_box(coords)
-            lat_mask = (coords_bb['min_lat'] <= cands[:, 0]) * (cands[:, 0] <= coords_bb['max_lat'])
-            lng_mask = (coords_bb['min_lng'] <= cands[:, 1]) * (cands[:, 1] <= coords_bb['max_lng'])
-            mask = lat_mask * lng_mask
-            cands = cands[mask]
+            if len(cands) > 0:
+                coords_bb = self.compute_bounding_box(coords)
+                lat_mask = (coords_bb['min_lat'] <= cands[:, 0]) * (cands[:, 0] <= coords_bb['max_lat'])
+                lng_mask = (coords_bb['min_lng'] <= cands[:, 1]) * (cands[:, 1] <= coords_bb['max_lng'])
+                mask = lat_mask * lng_mask
+                cands = cands[mask]
             return cands
 
         # Generate candidates based on current points
-        voronoi_candidates = self.generate_voronoi_candidates(np.array(coords))
-        voronoi_candidates = mask_outside_terminal_bb(coords, voronoi_candidates)
         fermat_candidates = self.generate_proximity_fermat_candidates(np.array(coords), max_candidates=100)
-        fermat_candidates = mask_outside_terminal_bb(coords, fermat_candidates)
-
-        # candidates =fermat_candidates
-        # candidates = np.empty((0, 2))
-        candidates = np.concatenate([voronoi_candidates, fermat_candidates], axis=0)
+        candidates = mask_outside_terminal_bb(coords, fermat_candidates)
 
         n_terminals = len(self._terminal_indices) + 1  # +1 for source
         pole_indices = list(range(n_terminals, len(coords)))
@@ -342,8 +339,6 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             ax.set_xlabel("Longitude")
             ax.set_ylabel("Latitude")
             ax.set_aspect('equal')
-            ax.scatter(voronoi_candidates[:, 1], voronoi_candidates[:, 0], s=100, marker='o',
-                       label='Voronoi Candidates')
             ax.scatter(fermat_candidates[:, 1], fermat_candidates[:, 0], s=100, marker='o', label='Fermat Candidates')
             ax.scatter(collinear_candidates[:, 1], collinear_candidates[:, 0], s=100, marker='o',
                        label='Collinear Candidates')
@@ -430,7 +425,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 - source_idx (int): Index of the source node in the graph.
                 - terminal_indices (List[int]): Indices of the terminal nodes.
                 - names (List[str]): List of node names corresponding to `coords`.
-                - costs (np.ndarray): Cost matrix used for the spanning arborescence calculation.
+                - solver (np.ndarray): Cost matrix used for the spanning arborescence calculation.
 
         Returns:
             Tuple[nx.DiGraph, List[Node], np.ndarray]: A tuple containing:

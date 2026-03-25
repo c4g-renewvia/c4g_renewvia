@@ -138,7 +138,7 @@ class BaseMiniGridSolver(ABC):
     @staticmethod
     def parse_input(request: SolverRequest, poles: bool = True, debug: int = 0):
         """
-        Parses input request containing information about geographical points, costs, and their attributes to generate structured
+        Parses input request containing information about geographical points, solver, and their attributes to generate structured
         data suitable for optimization tasks.
 
         This function processes the input `SolverRequest` to extract coordinates, their names, and classify one of the
@@ -147,10 +147,10 @@ class BaseMiniGridSolver(ABC):
         data for consistency.
 
         Args:
-            request: Input request containing points and their associated costs
+            request: Input request containing points and their associated solver
 
         Returns:
-            A tuple containing coords, terminal_indices, source_idx, original_names, costs
+            A tuple containing coords, terminal_indices, source_idx, original_names, solver
         """
 
         points = request.points
@@ -204,7 +204,7 @@ class BaseMiniGridSolver(ABC):
                     print(f"Warning: Multiple potential sources detected; using first (index {source_idx})")
                 else:
                     source_idx = i
-                    names[i] = "Power Source"  # canonical name
+                    names[i] = "Source"  # canonical name
 
         coords = np.array(coords_list, dtype=np.float64)
 
@@ -360,8 +360,8 @@ class BaseMiniGridSolver(ABC):
         list[Node], np.ndarray, int, List[int], List[str], Dict[str, float]]:
         """
         Parses and validates the input data for constructing nodes. This includes parsing input data
-        such as coordinates, source index, terminal indices, names, and costs, as well as ensuring
-        basic operational validity through validation checks and setting default costs if not
+        such as coordinates, source index, terminal indices, names, and solver, as well as ensuring
+        basic operational validity through validation checks and setting default solver if not
         provided.
 
         Args:
@@ -386,7 +386,7 @@ class BaseMiniGridSolver(ABC):
             raise ValueError("Need at least source + 1 terminal")
 
         self._costs = self._costs or {}
-        # Ensure default costs exist (subclasses can still override/ignore)
+        # Ensure default solver exist (subclasses can still override/ignore)
         self._costs.setdefault("poleCost", 100.0)
         self._costs.setdefault("lowVoltageCostPerMeter", 10.0)
         self._costs.setdefault("highVoltageCostPerMeter", 20.0)
@@ -400,7 +400,7 @@ class BaseMiniGridSolver(ABC):
         Cost of wire and pole
         Args:
             length: length of edge
-            voltage_cost_key: cost to use for edge. key in self.request.costs dict,
+            voltage_cost_key: cost to use for edge. key in self.request.solver dict,
                 e.g. "lowVoltageCostPerMeter" or "highVoltageCostPerMeter"
 
         Returns:
@@ -449,7 +449,7 @@ class BaseMiniGridSolver(ABC):
             terminal_indices: List of integers representing indices of all terminals.
             pole_indices: List of integers representing indices of all poles.
             dist_matrix: 2D matrix where each element represents the distance between nodes.
-            costs: Dictionary storing cost values for graph construction. Specifically,
+            solver: Dictionary storing cost values for graph construction. Specifically,
                    it should include the `"poleCost"` key to determine the cost addition
                    for pole-to-pole connections.
 

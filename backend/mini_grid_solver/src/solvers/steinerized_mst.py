@@ -49,7 +49,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         Initialize the solver with the input request and edge length constraint.
 
         Args:
-            request: SolverRequest containing points (lat/lng), costs, etc.
+            request: SolverRequest containing points (lat/lng), solver, etc.
             max_edge_length: Maximum allowed length (meters) for any single cable segment.
                              Defaults to 30.0 meters.
         """

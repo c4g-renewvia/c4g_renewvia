@@ -2263,12 +2263,12 @@ export default function DemoPage() {
 
                 {expandedSections.costs && (
                   <div className='space-y-4'>
-                    <h3 className='mb-5 text-xl font-semibold text-zinc-100'>
+                    <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
                       Cost Parameters
                     </h3>
                     <div className='grid gap-6 sm:grid-cols-3'>
                       <div>
-                        <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
+                        <label className='light:text-zinc-100 mb-2 block text-sm font-medium dark:text-zinc-300'>
                           Pole ($)
                         </label>
                         <input
@@ -2279,7 +2279,7 @@ export default function DemoPage() {
                           onChange={(e) =>
                             setPoleCost(parseFloat(e.target.value))
                           }
-                          className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
+                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
                         />
                       </div>
                       <div>
@@ -2294,7 +2294,7 @@ export default function DemoPage() {
                           onChange={(e) =>
                             setLowVoltageCost(parseFloat(e.target.value))
                           }
-                          className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
+                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
                         />
                       </div>
                       <div>
@@ -2309,7 +2309,7 @@ export default function DemoPage() {
                           onChange={(e) =>
                             setHighVoltageCost(parseFloat(e.target.value))
                           }
-                          className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm focus:border-emerald-500'
+                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
                         />
                       </div>
                     </div>
@@ -2322,7 +2322,7 @@ export default function DemoPage() {
 
                     {/* Solver Selection + Parameters + Run */}
                     <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-5 text-xl font-semibold text-zinc-100'>
+                      <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
                         Solver Configuration
                       </h3>
 
@@ -2330,7 +2330,7 @@ export default function DemoPage() {
                       <div className='relative mb-6'>
                         <label
                           htmlFor='solver-select'
-                          className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'
+                          className='light:text-zinc-600 mb-2 block text-sm font-medium dark:text-zinc-300'
                         >
                           Select Solver
                         </label>
@@ -2340,7 +2340,7 @@ export default function DemoPage() {
                           onChange={(e) =>
                             setSelectedSolverName(e.target.value)
                           }
-                          className='w-full appearance-none rounded-lg border border-zinc-700/70 bg-zinc-800/70 px-4 py-3 pr-10 text-base font-medium text-zinc-100 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/40'
+                          className='light:bg-zinc-600/70dark:bg-zinc-800/70 light:text-zinc-400 w-full appearance-none rounded-lg border border-zinc-700/70 px-4 py-3 pr-10 text-base font-medium focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/40 dark:text-zinc-100'
                         >
                           <option value='' disabled>
                             Choose a solver...
@@ -2351,9 +2351,9 @@ export default function DemoPage() {
                             </option>
                           ))}
                         </select>
-                        <div className='pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4'>
+                        <div className='pointer-events-none absolute inset-y-13 right-0 flex items-center pr-4'>
                           <svg
-                            className='h-5 w-5 text-zinc-400'
+                            className='h-5 w-5 text-zinc-400 dark:text-zinc-500'
                             fill='none'
                             stroke='currentColor'
                             viewBox='0 0 24 24'
@@ -2410,7 +2410,7 @@ export default function DemoPage() {
                       )}
 
                       {hasPoles && (
-                        <div className='mt-4 flex items-center gap-3 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-4'>
+                        <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
                           <input
                             type='checkbox'
                             id='use-poles'
@@ -2418,11 +2418,11 @@ export default function DemoPage() {
                             onChange={(e) =>
                               setUseExistingPoles(e.target.checked)
                             }
-                            className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
+                            className='light:bg-zinc-300 h-5 w-5 rounded border-zinc-600 text-purple-600 focus:ring-purple-500 dark:bg-zinc-800'
                           />
                           <label
                             htmlFor='use-poles'
-                            className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
+                            className='light:text-zinc-600 cursor-pointer text-sm font-medium dark:text-zinc-300'
                           >
                             Use existing poles in calculation ({poleCount} poles
                             detected)
@@ -2431,179 +2431,7 @@ export default function DemoPage() {
                       )}
 
                       {miniGridNodes.length > 0 && (
-                        <div className='mt-4 flex items-center gap-3 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-4'>
-                          <input
-                            type='checkbox'
-                            id='allow-drag-terminals'
-                            checked={allowDragTerminals}
-                            onChange={(e) =>
-                              setAllowDragTerminals(e.target.checked)
-                            }
-                            className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
-                          />
-                          <label
-                            htmlFor='allow-drag-terminals'
-                            className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                          >
-                            Allow dragging of{' '}
-                            <span className='font-semibold text-blue-400'>
-                              Terminals
-                            </span>{' '}
-                            (Poles can always be dragged)
-                          </label>
-                        </div>
-                      )}
-
-                      {/* Run Button */}
-                      <div className='mt-auto pt-4'>
-                        <button
-                          onClick={handleRunSolver}
-                          disabled={
-                            computingMiniGrid ||
-                            dataPoints.length < 2 ||
-                            !selectedSolverName
-                          }
-                          className='w-full rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all hover:scale-[1.02] hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50'
-                        >
-                          {computingMiniGrid ? 'Solving...' : 'Run Solver'}
-                        </button>
-
-                        <p className='mt-4 text-xs text-zinc-500'>
-                          Beta • Low Voltage Only • Limited to Single Power
-                          Source
-                        </p>
-                      </div>
-
-                      {calcError && (
-                        <p className='mt-4 text-center text-sm font-medium text-red-400'>
-                          {calcError}
-                        </p>
-                      )}
-
-                      {calculationResult && (
-                        <div className='mt-6 w-full rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-left'>
-                          <h4 className='mb-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300'>
-                            Python result:
-                          </h4>
-                          <pre className='overflow-x-auto text-xs text-emerald-200/90'>
-                            {calculationResult}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Solver Selection + Parameters + Run */}
-                    <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-5 text-xl font-semibold text-zinc-100'>
-                        Solver Configuration
-                      </h3>
-
-                      {/* Solver Select */}
-                      <div className='relative mb-6'>
-                        <label
-                          htmlFor='solver-select'
-                          className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                        >
-                          Select Solver
-                        </label>
-                        <select
-                          id='solver-select'
-                          value={selectedSolverName}
-                          onChange={(e) =>
-                            setSelectedSolverName(e.target.value)
-                          }
-                          className='w-full appearance-none rounded-lg border border-zinc-700/70 bg-zinc-800/70 px-4 py-3 pr-10 text-base font-medium text-zinc-100 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/40'
-                        >
-                          <option value='' disabled>
-                            Choose a solver...
-                          </option>
-                          {solvers.map((s) => (
-                            <option key={s.name} value={s.name}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                        <div className='pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4'>
-                          <svg
-                            className='h-5 w-5 text-zinc-400'
-                            fill='none'
-                            stroke='currentColor'
-                            viewBox='0 0 24 24'
-                          >
-                            <path
-                              strokeLinecap='round'
-                              strokeLinejoin='round'
-                              strokeWidth={2}
-                              d='M19 9l-7 7-7-7'
-                            />
-                          </svg>
-                        </div>
-                      </div>
-
-                      {/* Dynamic Solver Parameters */}
-                      {selectedSolver && selectedSolver.params?.length > 0 && (
-                        <div className='mb-6 space-y-5 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-5'>
-                          <h4 className='text-lg font-medium text-zinc-200'>
-                            {selectedSolver.name} Parameters
-                          </h4>
-                          <div className='grid gap-5 sm:grid-cols-2'>
-                            {selectedSolver.params.map((param) => (
-                              <div key={param.name} className='space-y-1.5'>
-                                <label
-                                  htmlFor={`param-${param.name}`}
-                                  className='block text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                                >
-                                  {param.name}
-                                  <span className='ml-2 text-xs text-zinc-500'>
-                                    (default: {param.default})
-                                  </span>
-                                </label>
-                                <input
-                                  id={`param-${param.name}`}
-                                  type='number'
-                                  min={param.min}
-                                  max={param.max}
-                                  step={param.type === 'integer' ? 1 : 0.01}
-                                  value={paramValues[param.name] ?? ''}
-                                  onChange={(e) =>
-                                    updateParam(param.name, e.target.value)
-                                  }
-                                  className='w-full rounded-md border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-zinc-100 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30'
-                                />
-                                {param.description && (
-                                  <p className='text-xs text-zinc-500'>
-                                    {param.description}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {hasPoles && (
-                        <div className='mt-4 flex items-center gap-3 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-4'>
-                          <input
-                            type='checkbox'
-                            id='use-poles'
-                            checked={useExistingPoles}
-                            onChange={(e) =>
-                              setUseExistingPoles(e.target.checked)
-                            }
-                            className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
-                          />
-                          <label
-                            htmlFor='use-poles'
-                            className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                          >
-                            Use existing poles in calculation ({poleCount} poles
-                            detected)
-                          </label>
-                        </div>
-                      )}
-
-                      {miniGridNodes.length > 0 && (
-                        <div className='mt-4 flex items-center gap-3 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-4'>
+                        <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
                           <input
                             type='checkbox'
                             id='allow-drag-terminals'
@@ -2673,7 +2501,7 @@ export default function DemoPage() {
                   onClick={() => toggleSection('export')}
                   className='mb-6 flex w-full items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-900/20 px-5 py-4 transition-all hover:bg-blue-900/30'
                 >
-                  <h2 className='text-xl font-bold text-blue-300'>
+                  <h2 className='light:text-blue-700 text-lg font-bold text-blue-700 dark:text-blue-300'>
                     3. Export & Summary
                   </h2>
                   <svg

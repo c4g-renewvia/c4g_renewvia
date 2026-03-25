@@ -227,7 +227,7 @@ export default function DemoPage() {
 
   const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const { data: session } = useSession();
 

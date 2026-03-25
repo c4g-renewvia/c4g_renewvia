@@ -699,8 +699,17 @@ export default function DemoPage() {
     });
     markersRef.current = [];
 
-    // 2. Decide which points to show (Solver result takes priority)
-    const pointsToShow = miniGridNodes.length > 0 ? miniGridNodes : dataPoints;
+    // --- CHANGE START ---
+    // Combine dataPoints (raw/test data) and miniGridNodes (solver results/manual points)
+    // We use a Map keyed by name to ensure we don't render the same point twice
+    // if it exists in both arrays.
+    const uniquePoints = new Map();
+
+    dataPoints.forEach((p) => uniquePoints.set(p.name, p));
+    miniGridNodes.forEach((n) => uniquePoints.set(n.name, n));
+
+    const pointsToShow = Array.from(uniquePoints.values());
+    // --- CHANGE END ---
 
     if (pointsToShow.length === 0) return;
 
@@ -727,12 +736,18 @@ export default function DemoPage() {
       bounds.extend({ lat: point.lat, lng: point.lng });
     });
 
-    // 4. Fit bounds only if we actually added something
+    // 4. Fit bounds logic...
     if (hasValidPoints && !bounds.isEmpty()) {
-      // Small delay helps when map is still settling / resizing
-      setTimeout(() => {
-        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-      }, 150);
+      // Only auto-zoom if this is the FIRST time we are seeing points
+      // (prevents the map from jumping every time you click to add one)
+      if (
+        markersRef.current.length === pointsToShow.length &&
+        pointsToShow.length <= selectedCount + 1
+      ) {
+        setTimeout(() => {
+          map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+        }, 150);
+      }
     }
   }, [map, dataPoints, miniGridNodes]);
 
@@ -1993,7 +2008,14 @@ export default function DemoPage() {
 
                 {expandedSections.locations && (
                   <div className='space-y-4'>
-                    {/* Examples*/}
+                    {/* Click to Set Marker*/}
+                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 text-center backdrop-blur-sm dark:bg-zinc-900/50'>
+                      <p className='mb-3 text-lg font-semibold text-zinc-100'>
+                        Click on Map to add Marker Manually
+                      </p>
+                    </div>
+
+                    {/* Upload File*/}
                     <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
                       <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
                         Upload File
@@ -2249,7 +2271,7 @@ export default function DemoPage() {
                     {/* Manual Point Card */}
                     <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
                       <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Add Location Manually
+                        Add Marker Manually
                       </h3>
                       <form
                         onSubmit={handleAddManualPoint}

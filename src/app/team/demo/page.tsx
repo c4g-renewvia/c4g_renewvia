@@ -1780,13 +1780,58 @@ export default function DemoPage() {
       {/* MAIN SITE HEADER - Overlay on top of map */}
       <Header />
 
+      {/* 1. Sidebar Toggle Button (Hamburger) */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className='fixed top-20 left-4 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xl transition-all hover:scale-110 hover:bg-emerald-500 active:scale-95'
+        aria-label='Toggle Sidebar'
+      >
+        {sidebarOpen ? (
+          <svg
+            className='h-6 w-6'
+            fill='none'
+            stroke='currentColor'
+            viewBox='0 0 24 24'
+          >
+            <path
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              strokeWidth={2}
+              d='M6 18L18 6'
+            />
+          </svg>
+        ) : (
+          <svg
+            className='h-6 w-6'
+            fill='none'
+            stroke='currentColor'
+            viewBox='0 0 24 24'
+          >
+            <path
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              strokeWidth={2}
+              d='M4 6h16M4 12h16M4 18h16'
+            />
+          </svg>
+        )}
+      </button>
+
+      {/* 3. Global Backdrop Overlay */}
+      {sidebarOpen && (
+        <div
+          className='fixed inset-0 z-30 transition-opacity'
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* MAIN CONTAINER - Full Screen Map */}
       <div className='relative h-full overflow-hidden pt-16'>
         {/* FULL-BLEED MAP - Now fills the entire screen */}
         <div ref={mapRef} className='absolute inset-0 bg-zinc-950' />
 
         <div
-          className={`fixed top-16 left-0 z-40 h-[calc(100vh-4rem)] border-r bg-white text-zinc-900 shadow-xl backdrop-blur-xl transition-all duration-200 lg:static lg:translate-x-0 dark:bg-zinc-950 dark:text-white dark:text-zinc-900 ${
+          className={`fixed top-16 left-0 z-40 h-[calc(100vh-4rem)] max-w-full border-r bg-white text-zinc-900 shadow-2xl transition-transform duration-300 ease-in-out dark:bg-zinc-950 dark:text-white ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           style={{ width: `${sidebarWidth}px` }}

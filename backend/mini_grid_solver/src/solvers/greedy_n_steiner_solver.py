@@ -611,7 +611,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             mst=best_pruned_mst,
             nodes=nodes,
             max_length_m=MAX_POLE_TO_POLE_LV,
-            min_segment_length=15.0
+            min_segment_length=10.0
         )
 
         if self.request.debug >= 1:

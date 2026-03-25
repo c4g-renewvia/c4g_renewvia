@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { UserMenu } from './user-menu';
+import { TeamTabs } from '@/app/team/team-tabs';
 
 export function Header() {
   const { data, status } = useSession();
@@ -36,6 +37,8 @@ export function Header() {
           </Link>
         ) : null}
       </div>
+
+      <TeamTabs />
       <UserMenu />
     </header>
   );

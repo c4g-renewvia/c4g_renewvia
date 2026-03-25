@@ -1974,7 +1974,7 @@ export default function DemoPage() {
                   className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
                 >
                   <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
-                    1. Define Locations
+                    1. Define Locations Options
                   </h2>
                   <svg
                     className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.locations ? 'rotate-180' : ''}`}
@@ -1994,57 +1994,61 @@ export default function DemoPage() {
                 {expandedSections.locations && (
                   <div className='space-y-4'>
                     {/* Examples*/}
-                    <div className='mb-4 space-y-1.5 text-xs text-zinc-500'>
-                      <p>
-                        CSV example:{' '}
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
-                              Example
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
-                            <DialogHeader>
-                              <DialogTitle>CSV Sample Format</DialogTitle>
-                            </DialogHeader>
-                            <DialogDescription>
-                              <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
-                                {`Name,Type,Latitude,Longitude
+                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
+                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
+                        Upload File
+                      </h3>
+                      <div className='mb-4 space-y-1.5 text-xs text-zinc-500'>
+                        <p>
+                          CSV example:{' '}
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
+                                Example
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
+                              <DialogHeader>
+                                <DialogTitle>CSV Sample Format</DialogTitle>
+                              </DialogHeader>
+                              <DialogDescription>
+                                <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
+                                  {`Name,Type,Latitude,Longitude
 "Georgia Tech",source,33.77728650,-84.39617097
 "Student Center",terminal,33.77680000,-84.39750000
 "Library",terminal,33.77420000,-84.39890000
 "Dorm A",terminal,33.77850000,-84.39510000
 "Cafeteria",terminal,33.77790000,-84.39920000`}
-                              </pre>
-                              <p className='mt-3 text-xs text-zinc-400'>
-                                • Header row required
-                                <br />
-                                • Type: source or terminal
-                                <br />• ≥6 decimal places recommended
-                              </p>
-                            </DialogDescription>
-                            <DialogFooter>
-                              <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
-                                Close
-                              </DialogClose>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>{' '}
-                        | KML example:{' '}
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
-                              Example
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
-                            {/* your existing KML content here – same as before */}
-                            <DialogHeader>
-                              <DialogTitle>KML Sample Format</DialogTitle>
-                            </DialogHeader>
-                            <DialogDescription>
-                              <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
-                                {`<?xml version="1.0" encoding="UTF-8"?>
+                                </pre>
+                                <p className='mt-3 text-xs text-zinc-400'>
+                                  • Header row required
+                                  <br />
+                                  • Type: source or terminal
+                                  <br />• ≥6 decimal places recommended
+                                </p>
+                              </DialogDescription>
+                              <DialogFooter>
+                                <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
+                                  Close
+                                </DialogClose>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>{' '}
+                          | KML example:{' '}
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
+                                Example
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
+                              {/* your existing KML content here – same as before */}
+                              <DialogHeader>
+                                <DialogTitle>KML Sample Format</DialogTitle>
+                              </DialogHeader>
+                              <DialogDescription>
+                                <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
+                                  {`<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <Placemark>
@@ -2063,82 +2067,85 @@ export default function DemoPage() {
     </Placemark>
   </Document>
 </kml>`}
-                              </pre>
-                            </DialogDescription>
-                            <DialogFooter>
-                              <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
-                                Close
-                              </DialogClose>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      </p>
-                    </div>
+                                </pre>
+                              </DialogDescription>
+                              <DialogFooter>
+                                <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
+                                  Close
+                                </DialogClose>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        </p>
+                      </div>
 
-                    {/* ── Smaller drag & drop area ── */}
-                    <div
-                      className={`relative rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
-                        isDragOver
-                          ? 'border-emerald-400 bg-emerald-900/25'
-                          : 'border-zinc-700 hover:border-zinc-600'
-                      }`}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                    >
-                      <div className='flex flex-wrap items-center justify-center gap-4'>
-                        {/* Icon left */}
-                        <div className='shrink-0 text-3xl opacity-90'>📄</div>
+                      {/* ── Smaller drag & drop area ── */}
+                      <div
+                        className={`relative rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
+                          isDragOver
+                            ? 'border-emerald-400 bg-emerald-900/25'
+                            : 'border-zinc-700 hover:border-zinc-600'
+                        }`}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                      >
+                        <div className='flex flex-wrap items-center justify-center gap-4'>
+                          {/* Icon left */}
+                          <div className='shrink-0 text-3xl opacity-90'>📄</div>
 
-                        {/* Text + button right */}
-                        <div className='flex flex-col items-center gap-2'>
-                          <p className='text-base font-medium text-zinc-200'>
-                            {isDragOver
-                              ? 'Drop file here'
-                              : 'Drag & drop or click'}
-                          </p>
+                          {/* Text + button right */}
+                          <div className='flex flex-col items-center gap-2'>
+                            <p className='text-base font-medium text-zinc-200'>
+                              {isDragOver
+                                ? 'Drop file here'
+                                : 'Drag & drop or click'}
+                            </p>
 
-                          <label className='inline-flex cursor-pointer items-center rounded bg-emerald-600 px-5 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-emerald-700 active:scale-97 dark:text-white'>
-                            Select File
-                            <input
-                              type='file'
-                              accept='.csv,.kml'
-                              onChange={handleFileUpload}
-                              className='hidden'
-                            />
-                          </label>
+                            <label className='inline-flex cursor-pointer items-center rounded bg-emerald-600 px-5 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-emerald-700 active:scale-97 dark:text-white'>
+                              Select File
+                              <input
+                                type='file'
+                                accept='.csv,.kml'
+                                onChange={handleFileUpload}
+                                className='hidden'
+                              />
+                            </label>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Status messages */}
-                    <div className='mt-3 text-center text-sm'>
-                      <div className='flex flex-wrap items-center justify-center gap-x-6 gap-y-1.5'>
-                        {/* Selected file */}
-                        {fileName && (
-                          <p className='truncate font-medium text-zinc-600 dark:text-zinc-300'>
-                            Selected:{' '}
-                            <span className='text-zinc-400'>{fileName}</span>
-                          </p>
+                      {/* Status messages */}
+                      <div className='mt-3 text-center text-sm'>
+                        <div className='flex flex-wrap items-center justify-center gap-x-6 gap-y-1.5'>
+                          {/* Selected file */}
+                          {fileName && (
+                            <p className='truncate font-medium text-zinc-600 dark:text-zinc-300'>
+                              Selected:{' '}
+                              <span className='text-zinc-400'>{fileName}</span>
+                            </p>
+                          )}
+
+                          {/* Loaded count – shown only when successful */}
+                          {dataPoints.length > 0 && !loading && (
+                            <p className='font-medium text-emerald-700 dark:text-emerald-300'>
+                              Loaded {dataPoints.length} point
+                              {dataPoints.length !== 1 ? 's' : ''}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Error or Loading – full width below if present */}
+                        {error && (
+                          <p className='mt-1.5 text-red-400'>{error}</p>
                         )}
 
-                        {/* Loaded count – shown only when successful */}
-                        {dataPoints.length > 0 && !loading && (
-                          <p className='font-medium text-emerald-700 dark:text-emerald-300'>
-                            Loaded {dataPoints.length} point
-                            {dataPoints.length !== 1 ? 's' : ''}
+                        {loading && (
+                          <p className='mt-1.5 animate-pulse text-emerald-400'>
+                            Processing…
                           </p>
                         )}
                       </div>
-
-                      {/* Error or Loading – full width below if present */}
-                      {error && <p className='mt-1.5 text-red-400'>{error}</p>}
-
-                      {loading && (
-                        <p className='mt-1.5 animate-pulse text-emerald-400'>
-                          Processing…
-                        </p>
-                      )}
                     </div>
 
                     {/* Generate Test Data Card */}
@@ -2433,63 +2440,65 @@ export default function DemoPage() {
 
                 {expandedSections.solver_cost && (
                   <div className='space-y-4'>
-                    <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
-                      Cost Parameters
-                    </h3>
-                    <div className='grid gap-6 sm:grid-cols-3'>
-                      <div>
-                        <label className='light:text-zinc-100 mb-2 block text-sm font-medium dark:text-zinc-300'>
-                          Pole ($)
-                        </label>
-                        <input
-                          type='number'
-                          step='0.01'
-                          min='0'
-                          value={poleCost}
-                          onChange={(e) =>
-                            setPoleCost(parseFloat(e.target.value))
-                          }
-                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                        />
+                    <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
+                      <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
+                        Cost Parameters
+                      </h3>
+                      <div className='grid gap-6 sm:grid-cols-3'>
+                        <div>
+                          <label className='light:text-zinc-100 mb-2 block text-sm font-medium dark:text-zinc-300'>
+                            Pole ($)
+                          </label>
+                          <input
+                            type='number'
+                            step='0.01'
+                            min='0'
+                            value={poleCost}
+                            onChange={(e) =>
+                              setPoleCost(parseFloat(e.target.value))
+                            }
+                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
+                          />
+                        </div>
+                        <div>
+                          <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
+                            Low Volt. ($/m)
+                          </label>
+                          <input
+                            type='number'
+                            step='0.01'
+                            min='0'
+                            value={lowVoltageCost}
+                            onChange={(e) =>
+                              setLowVoltageCost(parseFloat(e.target.value))
+                            }
+                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
+                          />
+                        </div>
+                        <div>
+                          <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
+                            High Volt. ($/m)
+                          </label>
+                          <input
+                            type='number'
+                            step='0.01'
+                            min='0'
+                            value={highVoltageCost}
+                            onChange={(e) =>
+                              setHighVoltageCost(parseFloat(e.target.value))
+                            }
+                            disabled
+                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
-                          Low Volt. ($/m)
-                        </label>
-                        <input
-                          type='number'
-                          step='0.01'
-                          min='0'
-                          value={lowVoltageCost}
-                          onChange={(e) =>
-                            setLowVoltageCost(parseFloat(e.target.value))
-                          }
-                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                        />
-                      </div>
-                      <div>
-                        <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
-                          High Volt. ($/m)
-                        </label>
-                        <input
-                          type='number'
-                          step='0.01'
-                          min='0'
-                          value={highVoltageCost}
-                          onChange={(e) =>
-                            setHighVoltageCost(parseFloat(e.target.value))
-                          }
-                          disabled
-                          className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                        />
-                      </div>
+                      <button
+                        onClick={generateRandomCosts}
+                        className='mt-5 text-sm text-emerald-400 hover:underline'
+                      >
+                        Use realistic random values
+                      </button>
                     </div>
-                    <button
-                      onClick={generateRandomCosts}
-                      className='mt-5 text-sm text-emerald-400 hover:underline'
-                    >
-                      Use realistic random values
-                    </button>
 
                     {/* Solver Selection + Parameters + Run */}
                     <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
@@ -2784,6 +2793,10 @@ export default function DemoPage() {
                 )}
               </section>
             </div>
+
+            <p className='text-center text-xs text-zinc-500 dark:text-zinc-400'>
+              <a href={'https://forms.gle/Az6j5cjtzJJDEQAEA'}>Give Feedback</a>
+            </p>
           </div>
         </div>
 

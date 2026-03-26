@@ -1,14 +1,12 @@
 # optimizers/steinerized_mst.py
 
-import math
-from typing import List, Tuple
+from typing import Tuple
 
 import networkx as nx
-import numpy as np
 
 from .base_mini_grid_solver import BaseMiniGridSolver
 from .registry import register_solver
-from ..utils.models import SolverRequest, Node
+from ..utils.models import SolverRequest
 
 
 @register_solver
@@ -56,7 +54,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         super().__init__(request)
         self.max_edge_length = max_edge_length
 
-    def _solve(self, input_tuple) -> Tuple[nx.Graph, List[Node]]:
+    def _solve(self, input_tuple) -> Tuple[nx.Graph]:
         """
         Execute the full Steinerized MST algorithm and produce a SolverResult.
 
@@ -75,6 +73,13 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         n = len(coords)
 
         G = nx.complete_graph(n)
+        for node in nodes:
+            G.nodes[node.index]["name"] = node.name
+            G.nodes[node.index]["type"] = node.type
+            G.nodes[node.index]["lat"] = node.lat
+            G.nodes[node.index]["lng"] = node.lng
+            G.nodes[node.index]["used"] = node.used
+
         for i in range(n):
             for j in range(i + 1, n):
                 d = dist_matrix[i, j]
@@ -92,8 +97,8 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
             if orig_length <= self.max_edge_length:
                 continue  # no need to steinerize
 
-            p1 = coords[u]
-            p2 = coords[v]
+            p1 = (mst.nodes[u]["lat"], mst.nodes[u]["lng"])
+            p2 = (mst.nodes[v]["lat"], mst.nodes[v]["lng"])
 
             # Get intermediate points (excluding endpoints)
             intermediates = self._great_circle_intermediates(
@@ -113,14 +118,18 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
                 new_node_counter += 1
 
                 # Add to global lists
-                node = Node(index=new_id, lat=lat, lng=lon, type="pole", name=f"Pole {new_id}")
-                nodes.append(node)  # or use better naming scheme
-                coords = np.vstack([coords, [lat, lon]])
-                new_nodes_in_chain.append(new_id)
+                mst.add_node(new_id)
+                mst.nodes[new_id]["lat"] = lat
+                mst.nodes[new_id]["lng"] = lon
+                mst.nodes[new_id]["type"] = "pole"
+                mst.nodes[new_id]["name"] = "pole"
+                mst.nodes[new_id]["used"] = True
+
+                prev_node = mst.nodes(data=True)[prev]
 
                 # Connect previous → new
-                d = self.haversine_meters(coords[prev, 0], coords[prev, 1], lat, lon)
-                weight = d * costs["lowVoltageCostPerMeter"]
+                d = self.haversine_meters(prev_node['lat'], prev_node['lng'], lat, lon)
+                weight = self.calc_edge_weight(d, voltage="low")
 
                 mst.add_edge(prev, new_id,
                              weight=weight,
@@ -129,8 +138,10 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
 
                 prev = new_id
 
-            # Final segment: last new node → original v
-            d = self.haversine_meters(coords[prev, 0], coords[prev, 1], coords[v, 0], coords[v, 1])
+            original_node = mst.nodes(data=True)[v]
+
+            # Final segment: last new node → original
+            d = self.haversine_meters(prev_node['lat'], prev_node['lng'], original_node['lat'], original_node['lng'])
             weight = d * costs["lowVoltageCostPerMeter"]
 
             mst.add_edge(prev, v,
@@ -141,5 +152,4 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
             # ─── Remove the original long edge ────────────────────────────────
             mst.remove_edge(u, v)
 
-        return mst, nodes
-    
+        return mst

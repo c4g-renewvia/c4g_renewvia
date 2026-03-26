@@ -71,101 +71,94 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
     def split_long_edges_with_coords(
             self,
-            mst: nx.DiGraph,
-            nodes: List,
+            graph: nx.DiGraph,
             max_length_m: float = 30.0,
             min_segment_length: float = 15.0,
-    ) -> Tuple[nx.DiGraph, List]:
+    ) -> nx.DiGraph:
         """
         Break long edges (> max_length_m meters) into multiple shorter segments by
-        inserting new intermediate pole nodes along the straight line between endpoints.
+        inserting new intermediate pole nodes directly into the graph.
 
         Args:
-            mst: The current minimum spanning arborescence (directed graph)
-            nodes: Current list of Node objects (will be extended with new poles)
+            graph: The current minimum spanning arborescence (directed graph)
             max_length_m: Edges longer than this are fragmented (default: 30m)
             min_segment_length: Don't create segments shorter than this (safety)
 
         Returns:
-            (updated_mst, updated_nodes)
+            Updated graph with inserted intermediate nodes.
         """
-        # We'll build a new graph and extend the nodes list
-        new_mst = nx.DiGraph()
-        new_nodes = nodes.copy()  # shallow copy — we'll append new Node objects
+        new_graph = graph.copy()
 
-        # Quick lookup: index → Node
-        node_by_index = {n.index: n for n in new_nodes}
+        # Build a lookup for node attributes currently stored on the graph
+        node_data_by_index = {
+            n: data.copy()
+            for n, data in new_graph.nodes(data=True)
+        }
 
-        # Keep track of the highest index used so far
-        next_index = max(n.index for n in new_nodes) + 1
+        if not node_data_by_index:
+            return new_graph
 
-        # Copy all short edges directly + fragment long ones
-        for u, v, data in list(mst.edges(data=True)):
+        next_index = max(node_data_by_index) + 1
+
+        for u, v, data in list(new_graph.edges(data=True)):
             length_m = data.get("length", 0.0)
             voltage = data.get("voltage", "unknown")
 
             if abs(length_m - max_length_m) < 2:
-                # Short enough → copy edge as-is
-                new_mst.add_edge(u, v, **data)
                 continue
 
-            # Long edge → fragment
-            start_node = node_by_index[u]
-            end_node = node_by_index[v]
+            start_node = node_data_by_index[u]
+            end_node = node_data_by_index[v]
 
-            start_coord = np.array([start_node.lat, start_node.lng])
-            end_coord = np.array([end_node.lat, end_node.lng])
+            start_coord = np.array([start_node["lat"], start_node["lng"]], dtype=float)
+            end_coord = np.array([end_node["lat"], end_node["lng"]], dtype=float)
 
-            # Direction vector
             direction = end_coord - start_coord
-            total_length = length_m  # already in meters
+            total_length = length_m
 
-            # How many full segments do we want?
             num_segments = max(2, int(np.floor(total_length / max_length_m)))
             segment_length = total_length / num_segments
 
             if segment_length < min_segment_length:
-                # Edge is long but segments would be too small → just leave it
-                # (or you could force at least 2 segments — decide policy)
-                new_mst.add_edge(u, v, **data)
                 continue
 
-            # We'll create (num_segments - 1) new intermediate nodes
-            current = start_coord.copy()
-            prev_idx = u
+            # Replace the original long edge with a chain of shorter edges
+            new_graph.remove_edge(u, v)
 
+            prev_idx = u
             for i in range(1, num_segments):
-                # Move along the line
                 fraction = i / num_segments
                 current = start_coord + fraction * direction
 
-                # Create new pole node
-                new_node = Node(
-                    index=next_index,
+                new_graph.add_node(
+                    next_index,
                     lat=float(current[0]),
                     lng=float(current[1]),
                     type="pole",
-                    name=None,  # will be named later if used
-                    is_candidate=True,
-                    used=True,  # since it's going into the tree
+                    name=None,
+                    used=True,
                 )
-                new_nodes.append(new_node)
-                node_by_index[next_index] = new_node
 
-                # Connect previous → new
-                new_mst.add_edge(
+                node_data_by_index[next_index] = {
+                    "lat": float(current[0]),
+                    "lng": float(current[1]),
+                    "type": "pole",
+                    "name": None,
+                    "used": True,
+                }
+
+                new_graph.add_edge(
                     prev_idx,
                     next_index,
                     length=segment_length,
                     voltage=voltage,
-                    weight=self.calc_edge_weight(segment_length, voltage=voltage)
+                    weight=self.calc_edge_weight(segment_length, voltage=voltage),
                 )
 
                 prev_idx = next_index
                 next_index += 1
 
-            # Final segment: last intermediate → original end
-            new_mst.add_edge(
+            new_graph.add_edge(
                 prev_idx,
                 v,
                 length=segment_length,
@@ -173,10 +166,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 weight=self.calc_edge_weight(segment_length, voltage=voltage),
             )
 
-        # Optional: copy graph-level attributes if any exist
-        new_mst.graph.update(mst.graph)
-
-        return new_mst, new_nodes
+        new_graph.graph.update(graph.graph)
+        return new_graph
 
     def fermat_torricelli_point(self, pts: np.ndarray) -> np.ndarray:
         """
@@ -254,7 +245,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
         return candidates
 
-    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node]]:
+    def _solve(self, input_tuple) -> Union[nx.Graph, nx.DiGraph]:
         """
         Solves the problem by processing candidate points, building a graph, and computing a
         minimum spanning arborescence (MST) before postprocessing the result.
@@ -288,11 +279,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         mst = self.prune_dead_end_pole_branches(arbo_graph)
 
         # 6. break long line segments
-        mst, nodes = self.split_long_edges_with_coords(
-            mst=mst,
-            nodes=nodes,
-            max_length_m=30.0,
-            min_segment_length=5.0,
-        )
+        mst = self.split_long_edges_with_coords(graph=mst, max_length_m=30.0, min_segment_length=5.0)
 
-        return mst, nodes
+        return mst

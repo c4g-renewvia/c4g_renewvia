@@ -218,13 +218,7 @@ class BaseMiniGridSolver(ABC):
         return coords, terminal_indices, source_idx, names, costs
 
     @staticmethod
-    def _plot_current_tree(
-            nodes_list,  # List[Node]
-            mst_or_arbo,  # nx.Graph / nx.DiGraph
-            added_points=None,  # optional: the newly added candidate coord (tuple/list)
-            title="Current tree after candidate addition",
-            filename=None  # if given → save to file instead of show
-    ):
+    def _plot_current_tree(graph, added_points=None, title="Current tree after candidate addition", filename=None):
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.set_title(title)
         ax.set_xlabel("Longitude")
@@ -232,12 +226,18 @@ class BaseMiniGridSolver(ABC):
         ax.set_aspect('equal')
 
         # 1. Safely map indices to their true coordinates
-        coord_dict = {n.index: n.coord_tuple for n in nodes_list}
-
-        # 2. Extract specific coordinates by type
-        source_coords = [n.coord_tuple for n in nodes_list if n.type == "source"]
-        term_coords = [n.coord_tuple for n in nodes_list if n.type == "terminal"]
-        pole_coords = [n.coord_tuple for n in nodes_list if n.type == "pole"]
+        coord_dict = {}
+        source_coords = []
+        term_coords = []
+        pole_coords = []
+        for idx, node_data in graph.nodes(data=True):
+            coord_dict[idx] = (node_data['lat'], node_data['lng'])
+            if node_data['type'] == "source":
+                source_coords.append(coord_dict[idx])
+            elif node_data['type'] == "terminal":
+                term_coords.append(coord_dict[idx])
+            elif node_data['type'] == "pole":
+                pole_coords.append(coord_dict[idx])
 
         # Plot Source
         if source_coords:
@@ -257,12 +257,13 @@ class BaseMiniGridSolver(ABC):
         # Highlight newly added candidate
         if added_points is not None:
             added_points = np.array(added_points)
-            ax.scatter(added_points[:, 1], added_points[:, 0], c='orange', s=200, marker='*', edgecolor='black', linewidth=1.5,
+            ax.scatter(added_points[:, 1], added_points[:, 0], c='orange', s=200, marker='*', edgecolor='black',
+                       linewidth=1.5,
                        label='Newly added pole')
 
         # Plot edges
         edge_lines = []
-        for u, v in mst_or_arbo.edges():
+        for u, v in graph.edges():
             # Safely look up the exact coordinate using the node's unique index
             if u in coord_dict and v in coord_dict:
                 pt_u = [coord_dict[u][1], coord_dict[u][0]]  # [lng, lat]
@@ -332,7 +333,7 @@ class BaseMiniGridSolver(ABC):
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
-    def _solve(self, input_tuple) -> Tuple[Union[nx.DiGraph, nx.Graph], List[Node]]:
+    def _solve(self, input_tuple) -> Union[nx.DiGraph, nx.Graph]:
         """
         Abstract method to be implemented by subclasses.
         Solves the given input data and returns the resulting graph, list of nodes, and an array of results.
@@ -341,11 +342,8 @@ class BaseMiniGridSolver(ABC):
             structure and data type of the input must align with the expected requirements of the solution.
         :return: A tuple containing three elements:
             - A ``nx.Graph`` object representing the computed graph.
-            - A list of ``Node`` objects signifying the relevant nodes in the graph.
-            - A ``numpy.ndarray`` containing the results associated with the processed input data.
         """
         pass
-
 
     def solve(self) -> SolverResult:
         """
@@ -356,24 +354,11 @@ class BaseMiniGridSolver(ABC):
         """
 
         # 1. Parse input and input into abstract solver method
-        graph, nodes = self._solve(self.parse_and_validate_input(poles=True))
+        graph = self._solve(self.parse_and_validate_input(poles=True))
 
-        # 2. Extract used & name poles
-        used_nodes = self.extract_used_nodes(graph, nodes)
+        # graph = self._post_solver_local_opt(graph)
 
-        # 3. Build edges + lengths
-        edges, total_low, total_high = self._build_edges_and_lengths(graph, nodes)
-
-        # 4. Number of poles used
-        num_poles = sum(1 for n in used_nodes if n.type == "pole")
-
-        return self.build_solver_result(
-            edges=edges,
-            used_nodes=used_nodes,
-            total_low_m=total_low,
-            total_high_m=total_high,
-            num_poles=num_poles,
-        )
+        return self.build_solver_result(graph)
 
     # ─── Helpful common utilities (can be used or overridden) ────────────────
     def _build_nodes(self, coords, candidates, names):
@@ -473,15 +458,12 @@ class BaseMiniGridSolver(ABC):
 
         return weight
 
-    def _compute_total_cost(self, graph, nodes):
+    def _compute_total_cost(self, graph):
         # 1. Wire and span-pole costs
         wire_cost = sum(d['weight'] for u, v, d in graph.edges(data=True))
 
         # 2. Unique node costs
-        # Count how many nodes of type "pole" are present in the graph
-        # (Assuming you can access the node type from your nodes list via index)
-        used_indices = set(graph.nodes())
-        num_poles = sum(1 for idx in used_indices if nodes[idx].type == "pole")
+        num_poles = sum(1 for idx, data in graph.nodes(data=True) if data['type'] == "pole")
         pole_cost = self._costs.get("poleCost", 100.0)
 
         return wire_cost + (num_poles * pole_cost)
@@ -551,7 +533,6 @@ class BaseMiniGridSolver(ABC):
 
         return DG
 
-
     def _minimum_spanning_arborescence_w_attrs(self, DG, attr="weight", default=1e18, preserve_attrs=True):
         """
         Constructs a minimum spanning arborescence (directed tree) from a directed graph
@@ -581,36 +562,32 @@ class BaseMiniGridSolver(ABC):
 
         return arbo_graph
 
-
-    def extract_used_nodes(self, mst, nodes):
+    def extract_used_nodes(self, graph: Union[nx.DiGraph, nx.Graph]):
         """
         Extracts and processes nodes that are used within the provided pruned minimum
         spanning tree (MST). Marks the nodes as used, assigns them a name if they are
         of type "pole" and lack a name, and returns the list of used nodes.
 
         Args:
-            mst: The pruned minimum spanning tree used to determine which
+            graph: The pruned minimum spanning tree used to determine which
                 nodes to mark and process.
-            nodes: A list of nodes, where each node has attributes such as `index`,
-                `used`, `type`, and `name`.
 
         Returns:
             list: A list of nodes that are used, with appropriate properties updated
             based on the given MST and node attributes.
         """
-        used_indices = set(mst.nodes)
+        used_indices = set(graph.nodes)
         pole_counter = 1
         used_nodes = []
-        for node in nodes:
-            if node.index in used_indices:
-                node.used = True
-                if node.type == "pole":
-                    node.name = f"Pole {pole_counter}"
-                    pole_counter += 1
-                used_nodes.append(node)
-        return used_nodes
+        for idx, node_data in graph.nodes(data=True):
+            if node_data['type'] == "pole":
+                graph.nodes[idx]['used'] = True
+                if not node_data['name'] and node_data['type'] == "pole":
+                    graph.nodes[idx]['name'] = f"Pole {pole_counter}"
+                pole_counter += 1
+        return graph
 
-    def prune_dead_end_pole_branches(self, DG: nx.DiGraph) -> nx.DiGraph:
+    def prune_dead_end_pole_branches(self, DG: Union[nx.Graph, nx.DiGraph]) -> nx.DiGraph:
         """
         Prunes dead-end pole branches in a Directed Graph (DiGraph).
 
@@ -637,7 +614,7 @@ class BaseMiniGridSolver(ABC):
                 if leaf[1]['type'] == "pole":
                     # Check if this leaf (or its subtree) serves any terminal
                     descendants = nx.descendants(DG, leaf[0]) | {leaf[0]}
-                    if not any(DG.nodes(data=True)[d]['type'] =='terminal' for d in descendants):
+                    if not any(DG.nodes(data=True)[d]['type'] == 'terminal' for d in descendants):
                         # No terminal served → safe to remove
                         predecessors = list(DG.predecessors(leaf[0]))
                         for pred in predecessors:
@@ -646,44 +623,89 @@ class BaseMiniGridSolver(ABC):
                         removed = True
         return DG
 
-    def _build_edges_and_lengths(self, graph: Union[nx.Graph, nx.DiGraph], nodes: List[Node]):
-        edges = []
+    def _post_solver_local_opt(self, graph: Union[nx.Graph, nx.DiGraph]):
+        """
+        Optional local optimization step after the initial solve.
+
+        This method "jiggles" each pole by a small amount in all directions to find a more optimal solution.
+
+        Args:
+            graph (Union[nx.Graph, nx.DiGraph]): The graph resulting from the main solver.
+
+        """
+        # defne small grid of distances to move the poles
+        one_meter_deg = 1 / 111111  # rough conversion from meters to degrees
+
+        # 5 x 5 grid
+        grid_size = 20
+        grid_lat = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
+
+        grid_lng = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
+
+        # grid of tuples
+        grid_points = [(lat, lng) for lat in grid_lat for lng in grid_lng]
+
+        print(grid_points)
+
+        current_graph = graph.copy()
+        best_graph = graph.copy()
+
+        for node in graph.nodes(data=True):
+            node_idx, node_data = node
+            # only grab poles that are connected to the terminals
+            if graph.is_directed():
+                is_leaf = graph.out_degree(node_idx) == 1
+            else:
+                is_leaf = graph.degree(node_idx) == 1
+            if is_leaf:
+                best_cost = self._compute_total_cost(current_graph)
+                best_move = None
+                for move in grid_points:
+                    new_lat, new_lng = node_data['lat'] + move[0], node_data['lng'] + move[1]
+                    current_graph.nodes[node_idx]['lat'] = new_lat
+                    current_graph.nodes[node_idx]['lng'] = new_lng
+                    # recalculate the edges
+
+
+                    new_cost = self._compute_total_cost(current_graph)
+                    if new_cost < best_cost:
+                        best_cost = new_cost
+                        best_move = move
+
+                if best_move is not None:
+                    print(f"Moving pole {node_idx} by {best_move} for cost improvement of {best_cost}")
+                    best_graph.nodes[node_idx]['lat'] = node.lat + best_move[0]
+                    best_graph.nodes[node_idx]['lng'] = node.lng + best_move[1]
+
+        return best_graph
+
+    def _get_num_poles_and_wire_length(self, graph: Union[nx.Graph, nx.DiGraph]):
         low_m = high_m = 0.0
 
         for u, v, d in graph.edges(data=True):
             length = d.get("length", 0.0)
             voltage = d.get("voltage", "unknown")
 
-            start = next(n for n in nodes if n.index == u)
-            end = next(n for n in nodes if n.index == v)
-
-            edges.append(OutputEdge(
-                start={"lat": start.lat, "lng": start.lng, "name": start.name, "type": start.type},
-                end={"lat": end.lat, "lng": end.lng, "name": end.name, "type": end.type},
-                lengthMeters=round(length, 2),
-                voltage=voltage,
-            ))
-
             if voltage == "low":
                 low_m += length
             elif voltage == "high":
                 high_m += length
 
-        return edges, low_m, high_m
+        n_poles = sum(1 for idx, data in graph.nodes(data=True) if data['type'] == "pole")
 
-    def build_solver_result(
-            self,
-            edges: List[OutputEdge],
-            used_nodes: List[Node],
-            total_low_m: float = 0.0,
-            total_high_m: float = 0.0,
-            num_poles: int = 0,
-            debug_info: Optional[Dict[str, Any]] = None,
-    ) -> SolverResult:
+        return n_poles, low_m, high_m
+
+    def build_solver_result(self, graph, debug_info: Optional[Dict[str, Any]] = None) -> SolverResult:
         """
         Helper to construct a valid SolverResult from the most common pieces.
         Many simple algorithms can just produce edges + used nodes and call this.
+
+        Args:
+            graph:
         """
+        # 3. Build edges + lengths
+        num_poles, total_low_m, total_high_m = self._get_num_poles_and_wire_length(graph)
+
         pole_cost = self._costs.get("poleCost", 100.0)
         low_cost_m = self._costs.get("lowVoltageCostPerMeter", 10.0)
         high_cost_m = self._costs.get("highVoltageCostPerMeter", 20.0)
@@ -695,14 +717,26 @@ class BaseMiniGridSolver(ABC):
 
         node_dicts = [
             {
-                "index": n.index,
-                "lat": n.lat,
-                "lng": n.lng,
-                "name": n.name or f"{n.type.title()} {n.index}",
-                "type": n.type,
+                "index": idx,
+                "lat": n['lat'],
+                "lng": n['lng'],
+                "name": n['name'] or f"{n['type']} {idx}",
+                "type": n['type'],
             }
-            for n in used_nodes
+            for idx, n in graph.nodes(data=True)
         ]
+
+        edges = []
+
+        for start_idx, end_idx, edge_data in graph.edges(data=True):
+            start = graph.nodes[start_idx]
+            end = graph.nodes[end_idx]
+            edges.append(OutputEdge(
+                start={"lat": start['lat'], "lng": start['lng'], "name": start['name'], "type": start['type']},
+                end={"lat": end['lat'], "lng": end['lng'], "name": end['name'], "type": end['type']},
+                lengthMeters=round(edge_data['length'], 4),
+                voltage=edge_data["voltage"],
+            ))
 
         return SolverResult(
             edges=edges,

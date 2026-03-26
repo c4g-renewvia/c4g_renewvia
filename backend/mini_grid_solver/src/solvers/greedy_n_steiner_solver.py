@@ -346,7 +346,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                        label='Projection Candidates')
             ax.scatter(terminal_cluster_centers[:, 1], terminal_cluster_centers[:, 0], s=100, marker='o',
                        label='Cluster Candidates')
-            ax.scatter(adaptive_fermat[:, 1], adaptive_fermat[:, 0], s=100, marker='o', label='Adaptive Fermat Candidates')
+            ax.scatter(adaptive_fermat[:, 1], adaptive_fermat[:, 0], s=100, marker='o',
+                       label='Adaptive Fermat Candidates')
             ax.scatter(coords[:, 1], coords[:, 0], c='black', s=100, marker='o', label='Existing Points')
             ax.legend(fontsize=9)
             ax.grid(True, alpha=0.3)
@@ -368,7 +369,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         dg_init = self.build_directed_graph_for_arborescence(trial_nodes)
         arbo_init = self._minimum_spanning_arborescence_w_attrs(dg_init)
-        best_future_cost = self._compute_total_cost(arbo_init, trial_nodes)
+        best_future_cost = self._compute_total_cost(arbo_init)
 
         # 2. Perform depth-limited look-ahead
         for d in range(depth):
@@ -382,15 +383,12 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             # We try to improve the best_future_cost within this specific depth step
 
             for fc in look_ahead_cands:
-                f_coords = np.vstack([temp_coords, fc])
                 # We must pass the original base coords and the full set of added poles (candidate + fc)
-                f_nodes = self._build_nodes(current_coords,
-                                            np.vstack([candidate, fc]),
-                                            temp_names + ['pole'])
+                f_nodes = self._build_nodes(current_coords, np.vstack([candidate, fc]), temp_names + ['pole'])
 
                 DG = self.build_directed_graph_for_arborescence(f_nodes)
                 arbo = self._minimum_spanning_arborescence_w_attrs(DG)
-                cost = self._compute_total_cost(arbo, nodes=f_nodes)
+                cost = self._compute_total_cost(arbo)
 
                 if cost < best_future_cost:
                     best_future_cost = cost
@@ -405,7 +403,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return best_future_cost
 
-    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node]]:
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph]:
         """
         Solves the optimization problem of constructing the minimum spanning arborescence with additional candidate nodes
         from an initial set of nodes and edges. The algorithm iteratively improves upon the solution by adding and pruning
@@ -484,7 +482,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 arbo_graph = self._minimum_spanning_arborescence_w_attrs(DG)
                 pruned = self.prune_dead_end_pole_branches(arbo_graph)
 
-                imm_cost = self._compute_total_cost(pruned, trial_nodes)
+                imm_cost = self._compute_total_cost(pruned)
                 immediate_results.append({
                     "cost": imm_cost,
                     "cand": cand,
@@ -541,9 +539,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
             # Visualization for debugging
             if self.request.debug >= 1:
-                self._plot_current_tree(best_nodes, best_pruned_mst, added_points=[winner["cand"]],
+                self._plot_current_tree(best_pruned_mst, added_points=[winner["cand"]],
                                         title=f"Iteration {iteration} (Δ {improvement:+.2f} m)")
-
 
         # ==========================================
         # DROP PHASE (Reverse Deletion)
@@ -563,17 +560,17 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             arbo_graph = self._minimum_spanning_arborescence_w_attrs(DG)
             pruned = self.prune_dead_end_pole_branches(arbo_graph)
 
-            total_cost = self._compute_total_cost(pruned, trial_nodes)
+            total_cost = self._compute_total_cost(pruned)
 
-            if total_cost <= cur_total_weight + 1e-3:   # small tolerance
+            if total_cost <= cur_total_weight + 1e-3:  # small tolerance
                 if self.request.debug >= 1:
                     print(f"Drop Phase: Removed redundant pole at {candidate_to_drop_tup}. "
                           f"New cost: {total_cost:.2f} m")
 
                 current_added = test_added
                 cur_total_weight = total_cost
-                best_pruned_mst = pruned          # update graph
-                best_nodes = trial_nodes          # update nodes to match the graph indices
+                best_pruned_mst = pruned  # update graph
+                best_nodes = trial_nodes  # update nodes to match the graph indices
 
         if self.request.debug >= 1:
             print("--- Drop Phase Complete ---\n")
@@ -582,16 +579,11 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         final_added_candidates = np.array(current_added) if current_added else np.empty((0, 2), dtype=float)
         nodes = self._build_nodes(original_coords_array, final_added_candidates, names)
 
-        final_mst, final_nodes = self.split_long_edges_with_coords(
-            mst=best_pruned_mst,
-            nodes=nodes,
-            max_length_m=MAX_POLE_TO_POLE_LV,
-            min_segment_length=10.0
-        )
+        final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst,
+                                                      max_length_m=MAX_POLE_TO_POLE_LV,
+                                                      min_segment_length=20)
 
         if self.request.debug >= 1:
-            self._plot_current_tree(final_nodes, final_mst,
-                                    title="Final Tree After Drop + Splitting",
-                                    added_points=None)
+            self._plot_current_tree(final_mst, added_points=None, title="Final Tree After Drop + Splitting")
 
-        return final_mst, final_nodes
+        return final_mst

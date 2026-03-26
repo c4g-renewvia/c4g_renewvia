@@ -1,4 +1,3 @@
-from .voronoi_mst_solver import StaticVoronoiMSTSolver
 from .fermat_mst_solver import StaticFermatMSTSolver
 from .mst_solver import SimpleMSTSolver
 from .steinerized_mst import SteinerizedMSTSolver

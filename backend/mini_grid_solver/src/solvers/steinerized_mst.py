@@ -56,7 +56,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         super().__init__(request)
         self.max_edge_length = max_edge_length
 
-    def _solve(self, input_tuple) -> Tuple[nx.Graph, list[Node], np.ndarray]:
+    def _solve(self, input_tuple) -> Tuple[nx.Graph, List[Node]]:
         """
         Execute the full Steinerized MST algorithm and produce a SolverResult.
 
@@ -141,78 +141,5 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
             # ─── Remove the original long edge ────────────────────────────────
             mst.remove_edge(u, v)
 
-        return mst, nodes, coords
-
-    def _great_circle_intermediates(
-            self,
-            lat1: float, lon1: float,
-            lat2: float, lon2: float,
-            max_length: float
-    ) -> List[Tuple[float, float]]:
-        """
-        Generate intermediate points along the true great-circle path using vector math.
-
-        Converts lat/lon to 3D Cartesian unit vectors,
-        interpolates angularly (SLERP-like), then converts back to lat/lon.
-
-        This is more accurate than linear lat/lon interpolation, especially for longer segments.
-
-        Args:
-            lat1, lon1: Start point (degrees)
-            lat2, lon2: End point (degrees)
-            max_length: Max allowed segment length in meters
-
-        Returns:
-            List of (lat, lon) tuples: [start, inter1, inter2, ..., end]
-        """
-        lat1_rad = np.radians(lat1)
-        lon1_rad = np.radians(lon1)
-        lat2_rad = np.radians(lat2)
-        lon2_rad = np.radians(lon2)
-
-        v1 = np.array([
-            np.cos(lat1_rad) * np.cos(lon1_rad),
-            np.cos(lat1_rad) * np.sin(lon1_rad),
-            np.sin(lat1_rad)
-        ])
-        v2 = np.array([
-            np.cos(lat2_rad) * np.cos(lon2_rad),
-            np.cos(lat2_rad) * np.sin(lon2_rad),
-            np.sin(lat2_rad)
-        ])
-
-        total_distance = self.haversine_meters(lat1, lon1, lat2, lon2)
-        if total_distance <= max_length:
-            return []  # ← important: empty list
-
-        num_segments = math.ceil(total_distance / max_length)
-        num_intermediates = num_segments - 1
-
-        if num_intermediates <= 0:
-            return []
-
-        dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
-        omega = np.arccos(dot)
-        if omega < 1e-9:
-            return []
-
-        sin_omega = np.sin(omega)
-
-        intermediates = []
-
-        for k in range(1, num_intermediates + 1):
-            t = k / num_segments
-            a = np.sin((1 - t) * omega) / sin_omega
-            b = np.sin(t * omega) / sin_omega
-            v_interp = a * v1 + b * v2
-            v_interp /= np.linalg.norm(v_interp)
-
-            lat_rad = np.arcsin(v_interp[2])
-            lon_rad = np.arctan2(v_interp[1], v_interp[0])
-
-            intermediates.append((
-                np.degrees(lat_rad),
-                np.degrees(lon_rad)
-            ))
-
-        return intermediates
+        return mst, nodes
+    

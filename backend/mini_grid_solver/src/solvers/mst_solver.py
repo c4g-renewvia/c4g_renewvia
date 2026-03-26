@@ -27,7 +27,7 @@ class SimpleMSTSolver(BaseMiniGridSolver):
     Good as a baseline / lower bound reference.
     """
 
-    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node]]:
 
         nodes, coords, source_idx, terminal_indices, names, costs = input_tuple
 
@@ -42,15 +42,10 @@ class SimpleMSTSolver(BaseMiniGridSolver):
 
         if len(pole_indices) > 0:
 
-            DG = self.build_directed_graph_for_arborescence(
-                source_idx, terminal_indices, pole_indices, dist_matrix, costs,
-                max_pole_to_pole_lv=30,
-                max_pole_to_terminal_lv=30
+            DG = self.build_directed_graph_for_arborescence(nodes)
 
-            )
-
-            arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-            mst = self.prune_dead_end_pole_branches(arbo, pole_indices, terminal_indices)
+            arbo_graph = self._minimum_spanning_arborescence_w_attrs(DG)
+            mst = self.prune_dead_end_pole_branches(arbo_graph)
 
             # 7. All nodes are used (since it's a spanning tree)
             used_nodes = self.extract_used_nodes(mst, nodes)
@@ -67,4 +62,4 @@ class SimpleMSTSolver(BaseMiniGridSolver):
             used_nodes = nodes
 
 
-        return mst, used_nodes, coords
+        return mst, used_nodes

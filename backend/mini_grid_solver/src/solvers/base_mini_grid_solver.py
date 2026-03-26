@@ -10,7 +10,6 @@ from matplotlib import collections as mc
 
 from ..utils.models import *
 
-# For Voronoi candidates:
 MIN_DIST_TO_TERMINAL = 10.0,
 MAX_CIRCUMRADIUS = 300.0
 MIN_CANDIDATE_SEPARATION = 10.0
@@ -285,10 +284,55 @@ class BaseMiniGridSolver(ABC):
             plt.show()
             plt.close(fig)
 
+    def _great_circle_intermediates(
+            self,
+            lat1: float, lon1: float,
+            lat2: float, lon2: float,
+            max_length: float
+    ) -> List[Tuple[float, float]]:
+        """
+        Calculates intermediate points on the great-circle path between two geographical coordinates.
+
+        This function computes a series of intermediate latitude and longitude points along the
+        great-circle path between two given geographical coordinates, ensuring that the
+        distance between consecutive points does not exceed a specified maximum length.
+
+        Args:
+            lat1: Latitude of the starting point in decimal degrees.
+            lon1: Longitude of the starting point in decimal degrees.
+            lat2: Latitude of the ending point in decimal degrees.
+            lon2: Longitude of the ending point in decimal degrees.
+            max_length: Maximum allowed distance between consecutive points in meters.
+
+        Returns:
+            List of tuples representing the latitude and longitude of each point along
+            the path, including the starting and ending points.
+        """
+        d = self.haversine_meters(lat1, lon1, lat2, lon2)
+        if d <= max_length:
+            return [(lat1, lon1), (lat2, lon2)]
+
+        n_segments = math.ceil(d / max_length)
+        n_inter = n_segments - 1
+        step_dist = d / n_segments
+
+        points = [(lat1, lon1)]
+
+        # Very simple linear interpolation in lat/lon space (good enough for short distances < few km)
+        # For higher accuracy over long distances → use proper great-circle intermediate formula
+        for k in range(1, n_inter + 1):
+            frac = k / n_segments
+            lat = lat1 + frac * (lat2 - lat1)
+            lon = lon1 + frac * (lon2 - lon1)
+            points.append((lat, lon))
+
+        points.append((lat2, lon2))
+        return points
+
     # ─── Core abstract methods ───────────────────────────────────────────────
 
     @abstractmethod
-    def _solve(self, input_tuple) -> Tuple[Union[nx.DiGraph, nx.Graph], list[Node], np.ndarray]:
+    def _solve(self, input_tuple) -> Tuple[Union[nx.DiGraph, nx.Graph], List[Node]]:
         """
         Abstract method to be implemented by subclasses.
         Solves the given input data and returns the resulting graph, list of nodes, and an array of results.
@@ -312,7 +356,7 @@ class BaseMiniGridSolver(ABC):
         """
 
         # 1. Parse input and input into abstract solver method
-        graph, nodes, coords = self._solve(self.parse_and_validate_input(poles=True))
+        graph, nodes = self._solve(self.parse_and_validate_input(poles=True))
 
         # 2. Extract used & name poles
         used_nodes = self.extract_used_nodes(graph, nodes)
@@ -332,12 +376,12 @@ class BaseMiniGridSolver(ABC):
         )
 
     # ─── Helpful common utilities (can be used or overridden) ────────────────
-    def _build_nodes(self, coords, candidates, source_idx, terminals, names):
+    def _build_nodes(self, coords, candidates, names):
         nodes = []
         n_orig = len(coords)
 
         for i in range(n_orig):
-            if i == source_idx:
+            if i == self._source_idx:
                 t: Literal['source', 'pole', 'terminal'] = "source"
             else:
                 if "pole" in names[i].lower():
@@ -402,7 +446,7 @@ class BaseMiniGridSolver(ABC):
         self._costs.setdefault("lowVoltageCostPerMeter", 10.0)
         self._costs.setdefault("highVoltageCostPerMeter", 20.0)
 
-        self._nodes = self._build_nodes(self._coords, [], self._source_idx, self._terminal_indices, self._names)
+        self._nodes = self._build_nodes(self._coords, [], self._names)
 
         return self._nodes, self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
 
@@ -442,13 +486,7 @@ class BaseMiniGridSolver(ABC):
 
         return wire_cost + (num_poles * pole_cost)
 
-    def build_directed_graph_for_arborescence(
-            self,
-            source_idx,
-            terminal_indices,
-            pole_indices,
-            dist_matrix,
-    ) -> nx.DiGraph:
+    def build_directed_graph_for_arborescence(self, nodes) -> nx.DiGraph:
         """
         Builds a directed graph for use in finding a minimum-cost arborescence given
         a set of coordinates, indices, and constraints.
@@ -473,6 +511,16 @@ class BaseMiniGridSolver(ABC):
         """
 
         DG = nx.DiGraph()
+
+        pole_indices = [n.index for n in nodes if n.type == "pole"]
+        terminal_indices = [n.index for n in nodes if n.type == "terminal"]
+        source_idx = nodes[self._source_idx].index
+
+        all_points = np.array([n.coord_tuple for n in nodes])
+        dist_matrix = self.compute_distance_matrix(all_points)
+
+        for n in nodes:
+            DG.add_node(n.index, name=n.name, type=n.type, lat=n.lat, lng=n.lng)
 
         # 1: source → poles (main trunk)
         for p in pole_indices:
@@ -503,6 +551,37 @@ class BaseMiniGridSolver(ABC):
 
         return DG
 
+
+    def _minimum_spanning_arborescence_w_attrs(self, DG, attr="weight", default=1e18, preserve_attrs=True):
+        """
+        Constructs a minimum spanning arborescence (directed tree) from a directed graph
+        while optionally preserving node attributes.
+
+        Args:
+            DG (networkx.DiGraph): The directed graph to compute the minimum spanning
+                arborescence from.
+            attr (str): Name of the edge attribute to use as the weight for computing
+                the arborescence. Default is "weight".
+            default (float): Default weight assigned to edges if the specified attribute
+                does not exist. Default is 1e18.
+            preserve_attrs (bool): If True, preserves the attributes of nodes from the
+                input graph in the resulting arborescence. Default is True.
+
+        Returns:
+            networkx.DiGraph: A directed graph representing the minimum spanning
+            arborescence, optionally with preserved node attributes.
+        """
+
+        arbo_graph = nx.minimum_spanning_arborescence(DG, attr=attr, default=default, preserve_attrs=preserve_attrs)
+
+        if preserve_attrs:
+            for n, d in DG.nodes(data=True):
+                if n in arbo_graph:
+                    arbo_graph.nodes[n].update(d)  # or arbo_graph.nodes[n] = d.copy()
+
+        return arbo_graph
+
+
     def extract_used_nodes(self, mst, nodes):
         """
         Extracts and processes nodes that are used within the provided pruned minimum
@@ -531,7 +610,7 @@ class BaseMiniGridSolver(ABC):
                 used_nodes.append(node)
         return used_nodes
 
-    def prune_dead_end_pole_branches(self, DG: nx.DiGraph, pole_indices: list, terminal_indices) -> nx.DiGraph:
+    def prune_dead_end_pole_branches(self, DG: nx.DiGraph) -> nx.DiGraph:
         """
         Prunes dead-end pole branches in a Directed Graph (DiGraph).
 
@@ -549,20 +628,21 @@ class BaseMiniGridSolver(ABC):
             nx.DiGraph: A new directed graph with dead-end pole branches removed.
         """
         DG = DG.copy()
+
         removed = True
         while removed:
             removed = False
-            leaves = [n for n in DG.nodes() if DG.out_degree(n) == 0]
+            leaves = [n for n in DG.nodes(data=True) if DG.out_degree(n[0]) == 0]
             for leaf in leaves:
-                if leaf in pole_indices:
+                if leaf[1]['type'] == "pole":
                     # Check if this leaf (or its subtree) serves any terminal
-                    descendants = nx.descendants(DG, leaf) | {leaf}
-                    if not any(d in terminal_indices for d in descendants):
+                    descendants = nx.descendants(DG, leaf[0]) | {leaf[0]}
+                    if not any(DG.nodes(data=True)[d]['type'] =='terminal' for d in descendants):
                         # No terminal served → safe to remove
-                        predecessors = list(DG.predecessors(leaf))
+                        predecessors = list(DG.predecessors(leaf[0]))
                         for pred in predecessors:
-                            DG.remove_edge(pred, leaf)
-                        DG.remove_node(leaf)
+                            DG.remove_edge(pred, leaf[0])
+                        DG.remove_node(leaf[0])
                         removed = True
         return DG
 

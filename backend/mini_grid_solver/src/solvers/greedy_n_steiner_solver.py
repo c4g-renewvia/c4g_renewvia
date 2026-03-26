@@ -364,14 +364,10 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         # Initialize best_future_cost with the cost of the INITIAL candidate step
         # This ensures we always have a value to return if look-ahead fails.
-        trial_nodes = self._build_nodes(current_coords, [candidate],
-                                        self._source_idx, self._terminal_indices, temp_names)
-        dg_init = self.build_directed_graph_for_arborescence(
-            self._source_idx, self._terminal_indices,
-            [n.index for n in trial_nodes if n.type == "pole"],
-            self.compute_distance_matrix(temp_coords)
-        )
-        arbo_init = nx.minimum_spanning_arborescence(dg_init, attr="weight", default=1e18, preserve_attrs=True )
+        trial_nodes = self._build_nodes(current_coords, [candidate], temp_names)
+
+        dg_init = self.build_directed_graph_for_arborescence(trial_nodes)
+        arbo_init = self._minimum_spanning_arborescence_w_attrs(dg_init)
         best_future_cost = self._compute_total_cost(arbo_init, trial_nodes)
 
         # 2. Perform depth-limited look-ahead
@@ -388,15 +384,12 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             for fc in look_ahead_cands:
                 f_coords = np.vstack([temp_coords, fc])
                 # We must pass the original base coords and the full set of added poles (candidate + fc)
-                f_nodes = self._build_nodes(current_coords, np.vstack([candidate, fc]),
-                                            self._source_idx, self._terminal_indices, temp_names + ['pole'])
+                f_nodes = self._build_nodes(current_coords,
+                                            np.vstack([candidate, fc]),
+                                            temp_names + ['pole'])
 
-                dg = self.build_directed_graph_for_arborescence(
-                    self._source_idx, self._terminal_indices,
-                    [n.index for n in f_nodes if n.type == "pole"],
-                    self.compute_distance_matrix(f_coords)
-                )
-                arbo = nx.minimum_spanning_arborescence(dg, attr="weight", default=1e18)
+                DG = self.build_directed_graph_for_arborescence(f_nodes)
+                arbo = self._minimum_spanning_arborescence_w_attrs(DG)
                 cost = self._compute_total_cost(arbo, nodes=f_nodes)
 
                 if cost < best_future_cost:
@@ -412,7 +405,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return best_future_cost
 
-    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node], np.ndarray]:
+    def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node]]:
         """
         Solves the optimization problem of constructing the minimum spanning arborescence with additional candidate nodes
         from an initial set of nodes and edges. The algorithm iteratively improves upon the solution by adding and pruning
@@ -483,16 +476,13 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 trial_names = current_names + ['pole']
 
                 # Construct temporary nodes for this specific candidate
-                trial_nodes = self._build_nodes(current_coords, [cand], source_idx, terminal_indices, trial_names)
-                trial_dist_matrix = self.compute_distance_matrix(trial_coords)
+                trial_nodes = self._build_nodes(current_coords, [cand], trial_names)
                 pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
                 # Build graph and solve for immediate cost
-                DG = self.build_directed_graph_for_arborescence(
-                    source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix
-                )
-                arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-                pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
+                DG = self.build_directed_graph_for_arborescence(trial_nodes)
+                arbo_graph = self._minimum_spanning_arborescence_w_attrs(DG)
+                pruned = self.prune_dead_end_pole_branches(arbo_graph)
 
                 imm_cost = self._compute_total_cost(pruned, trial_nodes)
                 immediate_results.append({
@@ -567,18 +557,11 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         for candidate_to_drop_tup in list(reversed([tuple(c) for c in added_candidates])):
             test_added = [c for c in current_added if c != candidate_to_drop_tup]
 
-            trial_nodes = self._build_nodes(
-                original_coords_array, test_added, source_idx, terminal_indices, names
-            )
-            trial_coords = np.array([[n.lat, n.lng] for n in trial_nodes])
-            trial_dist_matrix = self.compute_distance_matrix(trial_coords)
-            pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
+            trial_nodes = self._build_nodes(original_coords_array, test_added, names)
 
-            DG = self.build_directed_graph_for_arborescence(
-                source_idx, terminal_indices, pole_indices_trial, trial_dist_matrix
-            )
-            arbo = nx.minimum_spanning_arborescence(DG, attr="weight", default=1e18, preserve_attrs=True)
-            pruned = self.prune_dead_end_pole_branches(arbo, pole_indices_trial, terminal_indices)
+            DG = self.build_directed_graph_for_arborescence(trial_nodes)
+            arbo_graph = self._minimum_spanning_arborescence_w_attrs(DG)
+            pruned = self.prune_dead_end_pole_branches(arbo_graph)
 
             total_cost = self._compute_total_cost(pruned, trial_nodes)
 
@@ -597,10 +580,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         # Final nodes + split
         final_added_candidates = np.array(current_added) if current_added else np.empty((0, 2), dtype=float)
-
-        nodes = self._build_nodes(
-            original_coords_array, final_added_candidates, source_idx, terminal_indices, names
-        )
+        nodes = self._build_nodes(original_coords_array, final_added_candidates, names)
 
         final_mst, final_nodes = self.split_long_edges_with_coords(
             mst=best_pruned_mst,
@@ -614,7 +594,4 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                                     title="Final Tree After Drop + Splitting",
                                     added_points=None)
 
-        final_coords = (np.vstack([original_coords_array, final_added_candidates])
-                        if len(final_added_candidates) > 0 else original_coords_array)
-
-        return final_mst, final_nodes, final_coords
+        return final_mst, final_nodes

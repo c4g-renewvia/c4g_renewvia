@@ -92,7 +92,6 @@ def test_all_solvers_with_csv(solver_name, csv_points, default_costs):
 
     # Create request with default params
     req = SolverRequest(
-        params={"n": 2},
         points=csv_points,
         costs=default_costs,
         debug=0,

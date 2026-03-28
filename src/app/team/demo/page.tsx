@@ -3044,7 +3044,7 @@ export default function DemoPage() {
         </div>
 
         {/* Floating Action Buttons - Horizontal Row */}
-        <div className='fixed right-16 bottom-5 z-50 flex items-center gap-3'>
+        <div className='fixed right-40 bottom-5 z-50 flex items-center gap-3'>
           {/* Undo Button */}
           <button
             onClick={() => {

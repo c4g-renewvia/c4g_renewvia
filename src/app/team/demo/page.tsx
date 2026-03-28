@@ -281,6 +281,53 @@ export default function DemoPage() {
     ...overrides,
   });
 
+  // ==================== KEYBOARD SHORTCUTS ====================
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Guard: Do not trigger if the user is typing inside an input box
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+        return;
+      }
+
+      // 2. Detect Ctrl (Windows/Linux) or Cmd (Mac)
+      const isModifierPressed = e.metaKey || e.ctrlKey;
+
+      if (isModifierPressed && e.key.toLowerCase() === 'z') {
+        e.preventDefault(); // Stop the browser's default text undo behavior
+
+        if (e.shiftKey) {
+          // REDO: Cmd/Ctrl + Shift + Z
+          if (canRedo) {
+            const s = redo();
+            if (s) {
+              setDataPoints(s.dataPoints);
+              setMiniGridNodes(s.miniGridNodes);
+              setMiniGridEdges(s.miniGridEdges);
+              setCostBreakdown(s.costBreakdown);
+            }
+          }
+        } else {
+          // UNDO: Cmd/Ctrl + Z
+          if (canUndo) {
+            const s = undo();
+            if (s) {
+              setDataPoints(s.dataPoints);
+              setMiniGridNodes(s.miniGridNodes);
+              setMiniGridEdges(s.miniGridEdges);
+              setCostBreakdown(s.costBreakdown);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup the event listener when the component unmounts or state changes
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canUndo, canRedo, undo, redo]); // Keep dependencies updated
+
   const { data: session } = useSession();
 
   useEffect(() => {

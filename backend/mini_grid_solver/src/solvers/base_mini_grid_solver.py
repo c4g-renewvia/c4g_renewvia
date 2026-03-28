@@ -147,6 +147,8 @@ class BaseMiniGridSolver(ABC):
 
         Args:
             request: Input request containing points and their associated solver
+            poles: If True, poles will be included in the parsed data.
+            debug: Debug level.
 
         Returns:
             A tuple containing coords, terminal_indices, source_idx, original_names, solver
@@ -315,7 +317,6 @@ class BaseMiniGridSolver(ABC):
 
         n_segments = math.ceil(d / max_length)
         n_inter = n_segments - 1
-        step_dist = d / n_segments
 
         points = [(lat1, lon1)]
 
@@ -440,7 +441,7 @@ class BaseMiniGridSolver(ABC):
         Cost of wire and pole
         Args:
             length: length of edge
-            voltage_cost_key: cost to use for edge. key in self.request.solver dict,
+            voltage: cost to use for edge. key in self.request.solver dict,
                 e.g. "lowVoltageCostPerMeter" or "highVoltageCostPerMeter"
 
         Returns:
@@ -470,26 +471,19 @@ class BaseMiniGridSolver(ABC):
 
     def build_directed_graph_for_arborescence(self, nodes) -> nx.DiGraph:
         """
-        Builds a directed graph for use in finding a minimum-cost arborescence given
-        a set of coordinates, indices, and constraints.
-
-        This function constructs a directed graph where poles and terminals are represented
-        as nodes, and edges represent potential connections between them. Different weight
-        and voltage attributes are applied to the edges depending on their type (pole-to-terminal,
-        pole-to-pole, or source-to-pole/terminal connections).
+        Constructs a directed graph representing an arborescence structure. The graph is built
+        based on nodes representing poles and terminals, with specific rules governing connections
+        between the source node, poles, and terminals. The graph edges are weighted based on
+        distance and voltage level.
 
         Args:
-            source_idx: Integer index representing the source node (e.g., a substation).
-            terminal_indices: List of integers representing indices of all terminals.
-            pole_indices: List of integers representing indices of all poles.
-            dist_matrix: 2D matrix where each element represents the distance between nodes.
-            solver: Dictionary storing cost values for graph construction. Specifically,
-                   it should include the `"poleCost"` key to determine the cost addition
-                   for pole-to-pole connections.
+            nodes (list): A list of node objects representing poles and terminals. Each node object
+                should have attributes such as `index`, `type`, `name`, `lat`, `lng`, and
+                `coord_tuple`.
 
         Returns:
-            nx.DiGraph: A directed graph with the defined nodes and edges.
-
+            nx.DiGraph: A directed graph (DiGraph) representing the arborescence structure, where
+            nodes represent the input nodes and edges represent connections between them.
         """
 
         DG = nx.DiGraph()
@@ -533,7 +527,8 @@ class BaseMiniGridSolver(ABC):
 
         return DG
 
-    def _minimum_spanning_arborescence_w_attrs(self, DG, attr="weight", default=1e18, preserve_attrs=True):
+    @staticmethod
+    def _minimum_spanning_arborescence_w_attrs(DG, attr="weight", default=1e18, preserve_attrs=True):
         """
         Constructs a minimum spanning arborescence (directed tree) from a directed graph
         while optionally preserving node attributes.
@@ -562,7 +557,8 @@ class BaseMiniGridSolver(ABC):
 
         return arbo_graph
 
-    def extract_used_nodes(self, graph: Union[nx.DiGraph, nx.Graph]):
+    @staticmethod
+    def rename_poles(graph: Union[nx.DiGraph, nx.Graph]) -> Union[nx.DiGraph, nx.Graph]:
         """
         Extracts and processes nodes that are used within the provided pruned minimum
         spanning tree (MST). Marks the nodes as used, assigns them a name if they are
@@ -576,18 +572,17 @@ class BaseMiniGridSolver(ABC):
             list: A list of nodes that are used, with appropriate properties updated
             based on the given MST and node attributes.
         """
-        used_indices = set(graph.nodes)
         pole_counter = 1
-        used_nodes = []
         for idx, node_data in graph.nodes(data=True):
             if node_data['type'] == "pole":
                 graph.nodes[idx]['used'] = True
                 if not node_data['name'] and node_data['type'] == "pole":
                     graph.nodes[idx]['name'] = f"Pole {pole_counter}"
-                pole_counter += 1
+                    pole_counter += 1
         return graph
 
-    def prune_dead_end_pole_branches(self, DG: Union[nx.Graph, nx.DiGraph]) -> nx.DiGraph:
+    @staticmethod
+    def prune_dead_end_pole_branches(DG: Union[nx.Graph, nx.DiGraph]) -> nx.DiGraph:
         """
         Prunes dead-end pole branches in a Directed Graph (DiGraph).
 
@@ -598,8 +593,6 @@ class BaseMiniGridSolver(ABC):
 
         Args:
             DG (nx.DiGraph): A directed graph representing the network structure.
-            pole_indices (list): A list of node indices representing poles in the graph.
-            terminal_indices (list): A list of node indices representing terminals in the graph.
 
         Returns:
             nx.DiGraph: A new directed graph with dead-end pole branches removed.
@@ -640,7 +633,7 @@ class BaseMiniGridSolver(ABC):
         grid_size = 20
         grid_lat = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
 
-        grid_lng = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
+        grid_lng = grid_lat
 
         # grid of tuples
         grid_points = [(lat, lng) for lat in grid_lat for lng in grid_lng]
@@ -666,7 +659,6 @@ class BaseMiniGridSolver(ABC):
                     current_graph.nodes[node_idx]['lng'] = new_lng
                     # recalculate the edges
 
-
                     new_cost = self._compute_total_cost(current_graph)
                     if new_cost < best_cost:
                         best_cost = new_cost
@@ -679,7 +671,8 @@ class BaseMiniGridSolver(ABC):
 
         return best_graph
 
-    def _get_num_poles_and_wire_length(self, graph: Union[nx.Graph, nx.DiGraph]):
+    @staticmethod
+    def _get_num_poles_and_wire_length(graph: Union[nx.Graph, nx.DiGraph]):
         low_m = high_m = 0.0
 
         for u, v, d in graph.edges(data=True):
@@ -695,14 +688,28 @@ class BaseMiniGridSolver(ABC):
 
         return n_poles, low_m, high_m
 
-    def build_solver_result(self, graph, debug_info: Optional[Dict[str, Any]] = None) -> SolverResult:
+    def build_solver_result(self, graph: Union[nx.DiGraph, nx.Graph],
+                            debug_info: Optional[Dict[str, Any]] = None) -> SolverResult:
         """
-        Helper to construct a valid SolverResult from the most common pieces.
-        Many simple algorithms can just produce edges + used nodes and call this.
+        Builds a SolverResult object from the provided graph and debug information.
+
+        The function computes the cost estimation, number of poles, and length of wires
+        required based on graph attributes. It also creates a detailed representation
+        of nodes and edges present in the graph.
 
         Args:
-            graph:
+            graph (Union[nx.DiGraph, nx.Graph]): Input graph containing nodes and edges
+                with associated metadata such as geographic coordinates, types, and lengths.
+            debug_info (Optional[Dict[str, Any]]): Additional debug information to include
+                in the SolverResult if the request has debugging enabled.
+
+        Returns:
+            SolverResult: Aggregated result containing detailed metrics, node and edge
+            representation, and cost estimates.
         """
+        # rename poles to have a name
+        graph = self.rename_poles(graph)
+
         # 3. Build edges + lengths
         num_poles, total_low_m, total_high_m = self._get_num_poles_and_wire_length(graph)
 

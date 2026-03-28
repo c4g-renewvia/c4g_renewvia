@@ -44,7 +44,7 @@ class Node(BaseModel):
 
     @property
     def coord_tuple(self) -> tuple[float, float]:
-        return (self.lat, self.lng)
+        return self.lat, self.lng
 
 
 class OutputEdge(BaseModel):

@@ -110,7 +110,6 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
 
             # ─── Build chain: original u → new1 → new2 → ... → new_k → original v ───
             prev = u
-            new_nodes_in_chain = []
 
             for lat, lon in intermediates:
                 # Create new node

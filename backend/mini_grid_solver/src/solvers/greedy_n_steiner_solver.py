@@ -13,25 +13,21 @@ from ..utils.models import SolverRequest, Node
 
 
 @register_solver
-class GreedyNSteinerSolver(CandidateMSTSolver):
+class GreedyIterSteinerSolver(CandidateMSTSolver):
     """
-    Solver class for iteratively finding an optimized minimum spanning tree (MST)
-    or arborescence using candidate Steiner point additions.
+    Solver implementation using a greedy approach for refining the Minimum Spanning Tree (MST)
+    based on Steiner points.
 
-    This class extends the CandidateMSTSolver to apply iterative refinement via
-    Steiner point insertion and reevaluation of MST/arborescence solutions. It
-    includes visualization utilities, graph construction for arborescence, and a
-    solve method to perform multiple iterations based on candidate generation.
+    This class provides mechanisms for solving tree optimization problems using Steiner
+    points, by identifying and adding projection, cluster center, and Fermat point
+    candidates.
 
-    Args:
-        n: number of greedy candidates to evaluate per iteration (default: 1).
-            This controls how many of the generated candidates are evaluated in each iteration.
-            Setting n=1 means only the single best candidate (lowest cost)
+    Attributes:
+        None
     """
 
     def __init__(self, request: SolverRequest):
         super().__init__(request)
-        self.n = int(request.params.get("n", 1))
 
     @staticmethod
     def get_input_params():
@@ -95,7 +91,8 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return projs
 
-    def generate_cluster_center_candidates(self, coords, min_clusters=2, max_clusters=15, n_init=10):
+    @staticmethod
+    def generate_cluster_center_candidates(coords, n_init=10):
         """
         Generate candidate pole markers as centers of K-Means clusters.
 
@@ -264,14 +261,14 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                             max_length=MAX_POLE_TO_POLE_LV, num_per_edge=2):
 
         # remove candidates outside of terminal bounding box
-        def mask_outside_terminal_bb(coords, cands):
-            if len(cands) > 0:
-                coords_bb = self.compute_bounding_box(coords)
-                lat_mask = (coords_bb['min_lat'] <= cands[:, 0]) * (cands[:, 0] <= coords_bb['max_lat'])
-                lng_mask = (coords_bb['min_lng'] <= cands[:, 1]) * (cands[:, 1] <= coords_bb['max_lng'])
+        def mask_outside_terminal_bb(_coords, _cands):
+            if len(_cands) > 0:
+                coords_bb = self.compute_bounding_box(_coords)
+                lat_mask = (coords_bb['min_lat'] <= _cands[:, 0]) * (_cands[:, 0] <= coords_bb['max_lat'])
+                lng_mask = (coords_bb['min_lng'] <= _cands[:, 1]) * (_cands[:, 1] <= coords_bb['max_lng'])
                 mask = lat_mask * lng_mask
-                cands = cands[mask]
-            return cands
+                _cands = _cands[mask]
+            return _cands
 
         # Generate candidates based on current points
         fermat_candidates = self.generate_proximity_fermat_candidates(np.array(coords), max_candidates=100)
@@ -403,7 +400,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
         return best_future_cost
 
-    def _solve(self, input_tuple) -> Tuple[nx.DiGraph]:
+    def _solve(self, input_tuple) -> nx.DiGraph:
         """
         Solves the optimization problem of constructing the minimum spanning arborescence with additional candidate nodes
         from an initial set of nodes and edges. The algorithm iteratively improves upon the solution by adding and pruning
@@ -443,14 +440,11 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         cur_total_weight = np.inf
 
         # Persist the best state found
-        best_nodes = nodes
         best_pruned_mst = None
         cur_edges = None
 
         # 1. Initial Cluster Center Generation
-        terminal_cluster_centers = self.generate_cluster_center_candidates(
-            current_coords, min_clusters=2, max_clusters=12, n_init=5
-        )
+        terminal_cluster_centers = self.generate_cluster_center_candidates(current_coords, n_init=5)
 
         while True:
             iteration += 1
@@ -470,12 +464,10 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             # --- STEP 1: IMMEDIATE FILTERING (The "Beam" Selection) ---
             immediate_results = []
             for cand in candidates:
-                trial_coords = np.vstack([current_coords, cand])
                 trial_names = current_names + ['pole']
 
                 # Construct temporary nodes for this specific candidate
                 trial_nodes = self._build_nodes(current_coords, [cand], trial_names)
-                pole_indices_trial = [n.index for n in trial_nodes if n.type == "pole"]
 
                 # Build graph and solve for immediate cost
                 DG = self.build_directed_graph_for_arborescence(trial_nodes)
@@ -534,7 +526,6 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
             cur_total_weight = winner["cost"]
             best_pruned_mst = winner["graph"]
-            best_nodes = winner["nodes"]
             cur_edges = list(best_pruned_mst.edges())
 
             # Visualization for debugging
@@ -570,15 +561,11 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
                 current_added = test_added
                 cur_total_weight = total_cost
                 best_pruned_mst = pruned  # update graph
-                best_nodes = trial_nodes  # update nodes to match the graph indices
 
         if self.request.debug >= 1:
             print("--- Drop Phase Complete ---\n")
 
         # Final nodes + split
-        final_added_candidates = np.array(current_added) if current_added else np.empty((0, 2), dtype=float)
-        nodes = self._build_nodes(original_coords_array, final_added_candidates, names)
-
         final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst, max_length_m=MAX_POLE_TO_POLE_LV)
 
         if self.request.debug >= 1:

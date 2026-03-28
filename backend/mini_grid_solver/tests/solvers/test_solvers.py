@@ -1,6 +1,7 @@
-import pytest
 import pandas as pd
+import pytest
 from pykml import parser
+
 from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY
 from mini_grid_solver.src.utils.models import SolverRequest
 
@@ -14,6 +15,7 @@ def csv_points():
         return df.to_dict(orient="records")
     except FileNotFoundError:
         pytest.skip("BuildingCoordinates.csv not found")
+
 
 @pytest.fixture
 def kml_points():
@@ -39,6 +41,7 @@ def kml_points():
     except (FileNotFoundError, AttributeError):
         pytest.skip("KML file not found or incorrectly formatted")
 
+
 @pytest.fixture
 def default_costs():
     """Standard cost parameters used in your main script."""
@@ -47,6 +50,7 @@ def default_costs():
         "lowVoltageCostPerMeter": 10.0,
         "highVoltageCostPerMeter": 40.0,
     }
+
 
 @pytest.fixture
 def ga_tech_points():
@@ -63,16 +67,6 @@ def ga_tech_points():
         {"name": "Terminal 09", "type": "terminal", "lat": 33.77655566, "lng": -84.39499823},
         {"name": "Terminal 10", "type": "terminal", "lat": 33.77721148, "lng": -84.39735571}
     ]
-
-
-@pytest.fixture
-def default_costs():
-    """Standard cost parameters."""
-    return {
-        "poleCost": 100.0,
-        "lowVoltageCostPerMeter": 10.0,
-        "highVoltageCostPerMeter": 40.0,
-    }
 
 
 # ==================== TESTS ====================
@@ -179,7 +173,7 @@ def test_connectivity_spanning(ga_tech_points, default_costs):
     result = solver_class(req).solve()
 
     input_names = {p["name"] for p in ga_tech_points if "source" not in p['name'].lower()}
-    output_names = {n["name"] for n in result.nodes  if "source" not in n['name'].lower()}
+    output_names = {n["name"] for n in result.nodes if "source" not in n['name'].lower()}
 
     # Check that all original points exist in the output nodes list
     assert input_names.issubset(output_names)

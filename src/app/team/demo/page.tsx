@@ -214,7 +214,7 @@ export default function DemoPage() {
 
   const [solvers, setSolvers] = useState<Solvers[]>([]);
   const [selectedSolverName, setSelectedSolverName] = useState<string>(
-    'GreedyNSteinerSolver'
+    'GreedyIterSteinerSolver'
   );
   const selectedSolver = solvers.find((s) => s.name === selectedSolverName);
   const [paramValues, setParamValues] = useState<Record<string, number>>({});

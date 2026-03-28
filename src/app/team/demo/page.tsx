@@ -2855,7 +2855,7 @@ export default function DemoPage() {
                   onClick={() => toggleSection('export')}
                   className='mb-6 flex w-full items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-900/20 px-5 py-4 transition-all hover:bg-blue-900/30'
                 >
-                  <h2 className='light:text-blue-700 text-xl font-bold text-blue-700 dark:text-blue-300'>
+                  <h2 className='text-xl font-bold text-blue-700 dark:text-blue-300'>
                     3. Export & Summary
                   </h2>
                   <svg
@@ -2901,6 +2901,7 @@ export default function DemoPage() {
                       </div>
                     )}
 
+                    {/* Solver Cost Box */}
                     {solverOriginalCost > 0 && (
                       <div className='rounded-2xl border border-purple-500/30 bg-purple-900/20 p-6 text-center'>
                         <p className='text-xs font-bold tracking-widest text-purple-400 uppercase'>
@@ -2909,9 +2910,64 @@ export default function DemoPage() {
                         <p className='mt-1 text-4xl font-extrabold text-purple-300'>
                           ${formatUSD(solverOriginalCost)}
                         </p>
+                        <div className='mt-4 grid grid-cols-2 gap-x-4 border-t border-purple-500/20 pt-4 text-left text-[10px] text-purple-300/70'>
+                          {/* Column 1: Poles */}
+                          <div className='space-y-1'>
+                            <p className='text-xs font-semibold text-purple-400'>
+                              Poles
+                            </p>
+                            <p>
+                              {costBreakdown.poleCount} @ $
+                              {formatUSD(
+                                costBreakdown.usedPoleCost || poleCost
+                              )}
+                            </p>
+                            <p className='pt-1 font-medium text-purple-200'>
+                              Total: ${formatUSD(costBreakdown.poleCost)}
+                            </p>
+                          </div>
+                          {/* Column 2: Wires (Separated) */}
+                          <div className='space-y-3 border-l border-purple-500/10 pl-4'>
+                            <div className='space-y-0.5'>
+                              <p className='text-xs font-semibold text-purple-400'>
+                                LV Wire
+                              </p>
+                              <p>
+                                {formatMeters(costBreakdown.lowVoltageMeters)}m
+                                @ $
+                                {formatUSD(
+                                  costBreakdown.usedLowCostPerMeter ||
+                                    lowVoltageCost
+                                )}
+                                /m
+                              </p>
+                              <p className='font-medium text-purple-200'>
+                                Total: ${formatUSD(costBreakdown.lowWireCost)}
+                              </p>
+                            </div>
+                            <div className='space-y-0.5'>
+                              <p className='text-xs font-semibold text-purple-400'>
+                                HV Wire
+                              </p>
+                              <p>
+                                {formatMeters(costBreakdown.highVoltageMeters)}m
+                                @ $
+                                {formatUSD(
+                                  costBreakdown.usedHighCostPerMeter ||
+                                    highVoltageCost
+                                )}
+                                /m
+                              </p>
+                              <p className='font-medium text-purple-200'>
+                                Total: ${formatUSD(costBreakdown.highWireCost)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
 
+                    {/* Live Cost Box */}
                     {costBreakdown.grandTotal > 0 && (
                       <div className='rounded-2xl border border-emerald-500/30 bg-emerald-900/20 p-6 text-center'>
                         <p className='text-xs font-bold tracking-widest text-emerald-400 uppercase'>
@@ -2920,38 +2976,102 @@ export default function DemoPage() {
                         <p className='mt-1 text-4xl font-extrabold text-emerald-700 dark:text-emerald-300'>
                           ${formatUSD(costBreakdown.grandTotal)}
                         </p>
+                        <div className='mt-4 grid grid-cols-2 gap-x-4 border-t border-emerald-500/20 pt-4 text-left text-[10px] text-emerald-400/70'>
+                          {/* Column 1: Poles */}
+                          <div className='space-y-1'>
+                            <p className='text-xs font-semibold text-emerald-500'>
+                              Poles
+                            </p>
+                            <p>
+                              {
+                                miniGridNodes.filter((n) => n.type === 'pole')
+                                  .length
+                              }{' '}
+                              @ ${formatUSD(poleCost)}
+                            </p>
+                            <p className='pt-1 font-medium text-emerald-200'>
+                              Total: $
+                              {formatUSD(
+                                miniGridNodes.filter((n) => n.type === 'pole')
+                                  .length * poleCost
+                              )}
+                            </p>
+                          </div>
+                          {/* Column 2: Wires (Separated) */}
+                          <div className='space-y-3 border-l border-emerald-500/10 pl-4'>
+                            <div className='space-y-0.5'>
+                              <p className='text-xs font-semibold text-emerald-500'>
+                                LV Wire
+                              </p>
+                              <p>
+                                {formatMeters(costBreakdown.lowVoltageMeters)}m
+                                @ ${formatUSD(lowVoltageCost)}/m
+                              </p>
+                              <p className='font-medium text-emerald-200'>
+                                Total: $
+                                {formatUSD(
+                                  costBreakdown.lowVoltageMeters *
+                                    lowVoltageCost
+                                )}
+                              </p>
+                            </div>
+                            <div className='space-y-0.5'>
+                              <p className='text-xs font-semibold text-emerald-500'>
+                                HV Wire
+                              </p>
+                              <p>
+                                {formatMeters(costBreakdown.highVoltageMeters)}m
+                                @ ${formatUSD(highVoltageCost)}/m
+                              </p>
+                              <p className='font-medium text-emerald-200'>
+                                Total: $
+                                {formatUSD(
+                                  costBreakdown.highVoltageMeters *
+                                    highVoltageCost
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
 
-                    {costBreakdown.grandTotal !== 0 && (
-                      <div
-                        className={`rounded-2xl border p-6 text-center ${
-                          isNegative
-                            ? 'border-emerald-500/30 bg-emerald-900/20' // negative → green
-                            : 'border-red-500/30 bg-red-900/20' // positive → red
-                        }`}
-                      >
-                        <p
-                          className={`text-xs font-bold tracking-widest uppercase ${
-                            isNegative ? 'text-emerald-400' : 'text-red-400'
-                          }`}
-                        >
-                          Cost Difference
-                        </p>
-                        <p
-                          className={`mt-1 text-4xl font-extrabold ${
+                    {/* Cost Difference Box */}
+                    {costBreakdown.grandTotal !== 0 &&
+                      solverOriginalCost > 0 && (
+                        <div
+                          className={`rounded-2xl border p-6 text-center ${
                             isNegative
-                              ? 'text-emerald-700 dark:text-emerald-300'
-                              : 'text-red-300'
+                              ? 'border-emerald-500/30 bg-emerald-900/20'
+                              : 'border-red-500/30 bg-red-900/20'
                           }`}
                         >
-                          ${formatUSD(costDiff)}
-                        </p>
-                      </div>
-                    )}
+                          <p
+                            className={`text-xs font-bold tracking-widest uppercase ${
+                              isNegative ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                          >
+                            Cost Difference
+                          </p>
+                          <p
+                            className={`mt-1 text-4xl font-extrabold ${
+                              isNegative
+                                ? 'text-emerald-700 dark:text-emerald-300'
+                                : 'text-red-300'
+                            }`}
+                          >
+                            ${formatUSD(costDiff)}
+                          </p>
+                          <p className='mt-2 text-[10px] italic opacity-60'>
+                            {isNegative
+                              ? 'Savings vs Solver baseline'
+                              : 'Additional cost vs Solver baseline'}
+                          </p>
+                        </div>
+                      )}
 
                     {miniGridNodes.length > 0 && (
-                      <div>
+                      <div className='pt-4'>
                         <h3 className='mb-4 text-xl font-semibold text-emerald-700 dark:text-emerald-300'>
                           Export Options
                         </h3>
@@ -2978,14 +3098,6 @@ export default function DemoPage() {
                           />
                         </div>
                       </div>
-                    )}
-
-                    {/* Mobile Overlay */}
-                    {sidebarOpen && (
-                      <div
-                        className='fixed inset-0 z-30 bg-black/70 lg:hidden'
-                        onClick={() => setSidebarOpen(false)}
-                      />
                     )}
                   </div>
                 )}

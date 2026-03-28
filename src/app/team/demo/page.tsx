@@ -336,35 +336,47 @@ export default function DemoPage() {
 
   const handleRemovePoint = useCallback(
     (pointName: string) => {
-      const updatedPoints = dataPoints.filter((p) => p.name !== pointName);
-      const updatedNodes = miniGridNodes.filter((n) => n.name !== pointName);
+      // 1. Get the latest state from the Ref to avoid stale closures
+      const current = stateRef.current;
 
-      // Filter edges to remove those connected to the deleted point
-      const updatedEdges = miniGridEdges.filter((edge) => {
-        const startExists = updatedPoints.some(
-          (p) => Math.abs(p.lat - edge.start.lat) < 1e-9
+      // 2. Filter out the point and its node
+      const updatedPoints = current.dataPoints.filter(
+        (p) => p.name !== pointName
+      );
+      const updatedNodes = current.miniGridNodes.filter(
+        (n) => n.name !== pointName
+      );
+
+      // 3. Critically: Remove any edges connected to this specific point
+      // We check if both the start and end of an edge still exist in the new points list
+      const updatedEdges = current.miniGridEdges.filter((edge) => {
+        const startExists = updatedNodes.some(
+          (n) =>
+            Math.abs(n.lat - edge.start.lat) < 1e-9 &&
+            Math.abs(n.lng - edge.start.lng) < 1e-9
         );
-        const endExists = updatedPoints.some(
-          (p) => Math.abs(p.lat - edge.end.lat) < 1e-9
+        const endExists = updatedNodes.some(
+          (n) =>
+            Math.abs(n.lat - edge.end.lat) < 1e-9 &&
+            Math.abs(n.lng - edge.end.lng) < 1e-9
         );
         return startExists && endExists;
       });
 
+      // 4. Update React State
       setDataPoints(updatedPoints);
       setMiniGridNodes(updatedNodes);
       setMiniGridEdges(updatedEdges);
 
-      // Save current state to history after deletion
-      saveState(
-        captureState({
-          dataPoints: updatedPoints,
-          miniGridNodes: updatedNodes,
-          miniGridEdges: updatedEdges,
-          costBreakdown: { ...costBreakdown }, // Recalculate if necessary
-        })
-      );
+      // 5. Push to History
+      current.saveState({
+        dataPoints: updatedPoints,
+        miniGridNodes: updatedNodes,
+        miniGridEdges: updatedEdges,
+        costBreakdown: current.costBreakdown, // You may want to trigger a cost recalc here
+      });
     },
-    [dataPoints, miniGridNodes, miniGridEdges, costBreakdown, saveState]
+    [saveState] // Only depend on saveState; internal data comes from stateRef
   );
 
   // ==================== MARKER & DRAG LOGIC ====================
@@ -661,7 +673,8 @@ export default function DemoPage() {
 
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (confirm(`Delete ${point.name}?`)) {
+        // We use window.confirm for a simple check
+        if (window.confirm(`Delete ${point.name}?`)) {
           handleRemovePoint(point.name);
         }
       });
@@ -700,6 +713,24 @@ export default function DemoPage() {
     document.body.style.userSelect = '';
   };
 
+  // Inside DemoPage component, near your other useEffects
+  useEffect(() => {
+    if (isAddPointDialogOpen) {
+      const type = newPointDetails.type;
+
+      // Count how many of this type already exist
+      const count = dataPoints.filter((p) => p.type === type).length;
+
+      // Capitalize first letter for the label
+      const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+
+      setNewPointDetails((prev) => ({
+        ...prev,
+        name: `${typeLabel} ${String(count + 1).padStart(2, '0')}`,
+      }));
+    }
+  }, [newPointDetails.type, dataPoints, isAddPointDialogOpen]);
+
   useEffect(() => {
     if (!map) return;
 
@@ -707,17 +738,10 @@ export default function DemoPage() {
       'click',
       (e: google.maps.MapMouseEvent) => {
         if (e.latLng) {
-          const lat = e.latLng.lat();
-          const lng = e.latLng.lng();
+          setPendingPoint({ lat: e.latLng.lat(), lng: e.latLng.lng() });
 
-          // Calculate default name: Terminal + (current terminals + 1)
-          const terminalCount = dataPoints.filter(
-            (p) => p.type === 'terminal'
-          ).length;
-
-          setPendingPoint({ lat, lng });
           setNewPointDetails({
-            name: `Terminal ${String(terminalCount + 1).padStart(2, '0')}`,
+            name: '',
             type: 'terminal',
           });
           setIsAddPointDialogOpen(true);
@@ -956,7 +980,7 @@ export default function DemoPage() {
     setPendingPoint(null);
   };
 
-  const handleAddManualPoint = (e: React.FormEvent) => {
+  const handleAddCoordinatesManually = (e: React.FormEvent) => {
     e.preventDefault();
     const lat = parseFloat(manualPoint.lat);
     const lng = parseFloat(manualPoint.lng);
@@ -2466,7 +2490,7 @@ export default function DemoPage() {
                         Input Coordinates Manually
                       </h3>
                       <form
-                        onSubmit={handleAddManualPoint}
+                        onSubmit={handleAddCoordinatesManually}
                         className='space-y-4'
                       >
                         <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
@@ -3187,7 +3211,7 @@ export default function DemoPage() {
               >
                 <option value='terminal'>Terminal</option>
                 <option value='source'>Source</option>
-                <option value='pole'>Source</option>
+                <option value='pole'>Pole</option>
               </select>
             </div>
           </div>

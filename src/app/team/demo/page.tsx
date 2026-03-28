@@ -1706,7 +1706,7 @@ export default function DemoPage() {
 
       // Save the CORRECT solved state to history
       saveState({
-        dataPoints: [...dataPoints], // input points usually don't change
+        dataPoints: newDataPoints, // input points usually don't change
         miniGridNodes: newMiniGridNodes,
         miniGridEdges: newMiniGridEdges,
         costBreakdown: newCostBreakdown,

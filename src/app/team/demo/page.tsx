@@ -1591,30 +1591,17 @@ export default function DemoPage() {
   };
 
   const handleRunSolver = async () => {
-    let pointsToSend: MarkerPoint[];
+    const pointsToSend =
+      useExistingPoles && hasPoles
+        ? miniGridNodes // ← includes ALL existing poles + original terminals/source
+        : dataPoints; // ← only the original uploaded/added points (no solver poles)
 
-    if (useExistingPoles && dataPoints.length > 0) {
-      // Send ALL nodes (including poles) as fixed points
-      pointsToSend = dataPoints.map((node) => ({
-        name: node.name,
-        type: node.type,
-        lat: node.lat,
-        lng: node.lng,
-      }));
-      console.log(
-        `Sending ${pointsToSend.length} points INCLUDING ${poleCount} poles`
-      );
-    } else {
-      // Default: loop through miniGridPoints and only take poinst that are not type pole
-      pointsToSend = dataPoints
-        .filter((node) => node.type !== 'pole')
-        .map((node) => ({
-          name: node.name,
-          type: node.type,
-          lat: node.lat,
-          lng: node.lng,
-        }));
-    }
+    console.log(
+      `[handleRunSolver] Sending ${pointsToSend.length} points to backend`
+    );
+    console.log(
+      `[handleRunSolver] Using existing poles? ${useExistingPoles && hasPoles ? 'YES' : 'NO'} (${pointsToSend.filter((p) => p.type === 'pole').length} poles)`
+    );
 
     if (pointsToSend.length < 2) {
       alert('Need at least 2 points to run solver.');

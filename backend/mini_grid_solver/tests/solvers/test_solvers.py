@@ -101,11 +101,11 @@ def test_all_solvers_with_csv(solver_name, csv_points, default_costs):
 
 
 def test_steiner_solver_specific_logic(kml_points, default_costs):
-    """Specific check for GreedyNSteinerSolver using the KML dataset."""
-    if "GreedyNSteinerSolver" not in SOLVER_REGISTRY:
-        pytest.skip("GreedyNSteinerSolver not registered")
+    """Specific check for GreedyIterSteinerSolver using the KML dataset."""
+    if "GreedyIterSteinerSolver" not in SOLVER_REGISTRY:
+        pytest.skip("GreedyIterSteinerSolver not registered")
 
-    solver_class = SOLVER_REGISTRY["GreedyNSteinerSolver"]
+    solver_class = SOLVER_REGISTRY["GreedyIterSteinerSolver"]
     req = SolverRequest(
         points=kml_points,
         costs=default_costs,
@@ -184,7 +184,7 @@ def test_steiner_point_injection(ga_tech_points, default_costs):
     Verifies that Steiner-based solvers (like GreedyNSteiner) successfully
     inject additional 'pole' type nodes into the network.
     """
-    solver_class = SOLVER_REGISTRY["GreedyNSteinerSolver"]
+    solver_class = SOLVER_REGISTRY["GreedyIterSteinerSolver"]
     req = SolverRequest(points=ga_tech_points, costs=default_costs)
     result = solver_class(req).solve()
 

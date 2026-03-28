@@ -63,13 +63,13 @@ Solvers are decoupled from the main execution logic through a central `SOLVER_RE
 
 ## Available Solvers
 
-| Solver                       | Strategy                      | Key Features                                                                                                                |
-| :--------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------------------------------------- |
-| **`SimpleMSTSolver`**        | Baseline MST                  | Computes a standard Minimum Spanning Tree using only original points; useful as a lower-bound reference.                    |
-| **`SteinerizedMSTSolver`**   | MST + Fragmentation           | Builds an MST and inserts intermediate poles along any edge exceeding a maximum span (e.g., 30m).                           |
-| **`StaticVoronoiMSTSolver`** | Static Voronoi Steiner Points | Generates potential pole locations using Voronoi vertices points to reduce total wire length.                               |
-| **`StaticFermatMSTSolver`**  | Static Fermat Steiner Points  | Generates potential pole locations using Fermat-Torricelli points to reduce total wire length.                              |
-| **`GreedyNSteinerSolver`**   | Greedy Iteration              | Iteratively adds candidate poles from Voronoi, Fermat, collinear, and projection sets to find the most cost-effective tree. |
+| Solver                        | Strategy                      | Key Features                                                                                                                |
+| :---------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------------------------------------- |
+| **`SimpleMSTSolver`**         | Baseline MST                  | Computes a standard Minimum Spanning Tree using only original points; useful as a lower-bound reference.                    |
+| **`SteinerizedMSTSolver`**    | MST + Fragmentation           | Builds an MST and inserts intermediate poles along any edge exceeding a maximum span (e.g., 30m).                           |
+| **`StaticVoronoiMSTSolver`**  | Static Voronoi Steiner Points | Generates potential pole locations using Voronoi vertices points to reduce total wire length.                               |
+| **`StaticFermatMSTSolver`**   | Static Fermat Steiner Points  | Generates potential pole locations using Fermat-Torricelli points to reduce total wire length.                              |
+| **`GreedyIterSteinerSolver`** | Greedy Iteration              | Iteratively adds candidate poles from Voronoi, Fermat, collinear, and projection sets to find the most cost-effective tree. |
 
 ---
 

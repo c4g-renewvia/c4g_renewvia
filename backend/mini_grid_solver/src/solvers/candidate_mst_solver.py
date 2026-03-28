@@ -73,7 +73,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             self,
             graph: nx.DiGraph,
             max_length_m: float = 30.0,
-            min_segment_length: float = 15.0,
     ) -> nx.DiGraph:
         """
         Break long edges (> max_length_m meters) into multiple shorter segments by
@@ -82,7 +81,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         Args:
             graph: The current minimum spanning arborescence (directed graph)
             max_length_m: Edges longer than this are fragmented (default: 30m)
-            min_segment_length: Don't create segments shorter than this (safety)
 
         Returns:
             Updated graph with inserted intermediate nodes.
@@ -118,9 +116,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
             num_segments = max(2, int(np.floor(total_length / max_length_m)))
             segment_length = total_length / num_segments
-
-            if segment_length < min_segment_length:
-                continue
 
             # Replace the original long edge with a chain of shorter edges
             new_graph.remove_edge(u, v)
@@ -204,7 +199,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
 
     def generate_fermat_candidates(self, coords: np.ndarray, max_candidates: int = 30) -> np.ndarray:
         """
-        Generate candidate pole locations using approximate Fermat-Torricelli points
+        Generate candidate pole markers using approximate Fermat-Torricelli points
         from Delaunay triangles.
 
         Args:
@@ -279,6 +274,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         mst = self.prune_dead_end_pole_branches(arbo_graph)
 
         # 6. break long line segments
-        mst = self.split_long_edges_with_coords(graph=mst, max_length_m=30.0, min_segment_length=5.0)
+        mst = self.split_long_edges_with_coords(graph=mst, max_length_m=30.0)
 
         return mst

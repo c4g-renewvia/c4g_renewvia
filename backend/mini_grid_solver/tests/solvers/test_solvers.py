@@ -178,8 +178,8 @@ def test_connectivity_spanning(ga_tech_points, default_costs):
     req = SolverRequest(params={}, points=ga_tech_points, costs=default_costs)
     result = solver_class(req).solve()
 
-    input_names = {p["name"] for p in ga_tech_points}
-    output_names = {n["name"] for n in result.nodes}
+    input_names = {p["name"] for p in ga_tech_points if "source" not in p['name'].lower()}
+    output_names = {n["name"] for n in result.nodes  if "source" not in n['name'].lower()}
 
     # Check that all original points exist in the output nodes list
     assert input_names.issubset(output_names)

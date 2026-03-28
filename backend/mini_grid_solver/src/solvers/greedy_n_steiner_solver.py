@@ -97,7 +97,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
 
     def generate_cluster_center_candidates(self, coords, min_clusters=2, max_clusters=15, n_init=10):
         """
-        Generate candidate pole locations as centers of K-Means clusters.
+        Generate candidate pole markers as centers of K-Means clusters.
 
         - Tries multiple k values and takes all unique centers
         - Filters very small clusters (e.g. < 3 points)
@@ -186,7 +186,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
             max_candidates: int = 300,
     ) -> np.ndarray:
         """
-        Generate candidate pole locations using approximate Fermat-Torricelli points
+        Generate candidate pole markers using approximate Fermat-Torricelli points
         for ANY triplet of nodes where all three nodes are within `max_distance` of each other.
         """
         n = len(coords)
@@ -579,9 +579,7 @@ class GreedyNSteinerSolver(CandidateMSTSolver):
         final_added_candidates = np.array(current_added) if current_added else np.empty((0, 2), dtype=float)
         nodes = self._build_nodes(original_coords_array, final_added_candidates, names)
 
-        final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst,
-                                                      max_length_m=MAX_POLE_TO_POLE_LV,
-                                                      min_segment_length=20)
+        final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst, max_length_m=MAX_POLE_TO_POLE_LV)
 
         if self.request.debug >= 1:
             self._plot_current_tree(final_mst, added_points=None, title="Final Tree After Drop + Splitting")

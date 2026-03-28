@@ -23,6 +23,8 @@ import { Header } from '@/components/layout/header';
 
 import { useSession } from 'next-auth/react';
 
+import { useMiniGridHistory } from '@/hooks/useMiniGridHistory';
+
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
 
@@ -68,21 +70,21 @@ const highVoltageColor = '#8B5CF6';
 const lowVoltageColor = '#3B82F6';
 
 // ==================== INTERFACES ====================
-interface LocationPoint {
+export interface MarkerPoint {
   name: string;
   type: 'source' | 'terminal' | 'pole';
   lat: number;
   lng: number;
 }
 
-interface MiniGridEdge {
+export interface MiniGridEdge {
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
   lengthMeters: number;
   voltage: 'low' | 'high';
 }
 
-interface MiniGridNode {
+export interface MiniGridNode {
   index: number;
   lat: number;
   lng: number;
@@ -90,7 +92,7 @@ interface MiniGridNode {
   type: 'source' | 'terminal' | 'pole';
 }
 
-interface CostBreakdown {
+export interface CostBreakdown {
   lowVoltageMeters: number;
   highVoltageMeters: number;
   totalMeters: number;
@@ -111,7 +113,7 @@ interface MiniGridRun {
   name?: string;
   createdAt: string;
   fileName?: string | null;
-  dataPoints: LocationPoint[];
+  dataPoints: MarkerPoint[];
   miniGridNodes: MiniGridNode[];
   miniGridEdges: MiniGridEdge[];
   costBreakdown: CostBreakdown;
@@ -142,10 +144,10 @@ export default function DemoPage() {
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const markerDragRef = useRef<string | null>(null);
 
-  const [dataPoints, setDataPoints] = useState<LocationPoint[]>([]);
+  const [dataPoints, setDataPoints] = useState<MarkerPoint[]>([]);
   const [miniGridEdges, setMiniGridEdges] = useState<MiniGridEdge[]>([]);
   const [miniGridNodes, setMiniGridNodes] = useState<MiniGridNode[]>([]);
-  const [originalDataPoints, setOriginalDataPoints] = useState<LocationPoint[]>(
+  const [originalDataPoints, setOriginalDataPoints] = useState<MarkerPoint[]>(
     []
   );
   const [originalFileName, setOriginalFileName] = useState<string | null>(null);
@@ -182,12 +184,15 @@ export default function DemoPage() {
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
   const [allowDragTerminals, setAllowDragTerminals] = useState(true);
+  const allowDragTerminalsRef = useRef(true); // Add this line
+
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >({
     locations: false,
     solver_cost: false,
     export: false,
+    savedGrids: false,
   });
 
   const [isAddPointDialogOpen, setIsAddPointDialogOpen] = useState(false);
@@ -229,7 +234,91 @@ export default function DemoPage() {
   const [loadingSaved, setLoadingSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  const { saveState, undo, redo, canUndo, canRedo } = useMiniGridHistory({
+    dataPoints: [],
+    miniGridNodes: [],
+    miniGridEdges: [],
+    costBreakdown: {
+      lowVoltageMeters: 0,
+      highVoltageMeters: 0,
+      totalMeters: 0,
+      lowWireCost: 0,
+      highWireCost: 0,
+      wireCost: 0,
+      poleCount: 0,
+      poleCost: 0,
+      pointCount: 0,
+      grandTotal: 0,
+    },
+  });
+
+  // 1. Add this near your other refs
+  const stateRef = useRef({
+    dataPoints,
+    miniGridNodes,
+    miniGridEdges,
+    costBreakdown,
+    saveState,
+  });
+
+  // 2. Add this effect to sync it automatically
+  useEffect(() => {
+    stateRef.current = {
+      dataPoints,
+      miniGridNodes,
+      miniGridEdges,
+      costBreakdown,
+      saveState,
+    };
+  }, [dataPoints, miniGridNodes, miniGridEdges, costBreakdown, saveState]);
+
+  // Helper to bundle current state for the hook
+  const captureState = (overrides = {}) => ({
+    dataPoints,
+    miniGridNodes,
+    miniGridEdges,
+    costBreakdown,
+    ...overrides,
+  });
+
   const { data: session } = useSession();
+
+  useEffect(() => {
+    allowDragTerminalsRef.current = allowDragTerminals;
+  }, [allowDragTerminals]);
+
+  const handleRemovePoint = useCallback(
+    (pointName: string) => {
+      const updatedPoints = dataPoints.filter((p) => p.name !== pointName);
+      const updatedNodes = miniGridNodes.filter((n) => n.name !== pointName);
+
+      // Filter edges to remove those connected to the deleted point
+      const updatedEdges = miniGridEdges.filter((edge) => {
+        const startExists = updatedPoints.some(
+          (p) => Math.abs(p.lat - edge.start.lat) < 1e-9
+        );
+        const endExists = updatedPoints.some(
+          (p) => Math.abs(p.lat - edge.end.lat) < 1e-9
+        );
+        return startExists && endExists;
+      });
+
+      setDataPoints(updatedPoints);
+      setMiniGridNodes(updatedNodes);
+      setMiniGridEdges(updatedEdges);
+
+      // Save current state to history after deletion
+      saveState(
+        captureState({
+          dataPoints: updatedPoints,
+          miniGridNodes: updatedNodes,
+          miniGridEdges: updatedEdges,
+          costBreakdown: { ...costBreakdown }, // Recalculate if necessary
+        })
+      );
+    },
+    [dataPoints, miniGridNodes, miniGridEdges, costBreakdown, saveState]
+  );
 
   // ==================== MARKER & DRAG LOGIC ====================
   const createMarker = useCallback(
@@ -326,7 +415,7 @@ export default function DemoPage() {
         // 1. RULE: Terminals can only move if allowDragTerminals is true
         // We use the Ref version of the state if you have one, or ensure this
         // function is recreated when allowDragTerminals changes.
-        if (!isPole && !allowDragTerminals) {
+        if (!isPole && !allowDragTerminalsRef.current) {
           marker.position = { lat: prevLat, lng: prevLng };
           return;
         }
@@ -435,85 +524,106 @@ export default function DemoPage() {
       });
 
       // 5. Enforce final snap back when the user lets go of the mouse
-      // 5. Enforce final snap back when the user lets go of the mouse
       marker.addListener('dragend', () => {
-        let finalLat = point.lat; // default to original pre-drag location
-        let finalLng = point.lng;
-
         const prevStr = markerDragRef.current;
-        if (prevStr) {
-          // Snap the visual marker to the last valid position
-          const [prevLat, prevLng] = prevStr.split(',').map(Number);
-          marker.position = { lat: prevLat, lng: prevLng };
-          finalLat = prevLat;
-          finalLng = prevLng;
-        }
 
-        // 6. SYNC REACT STATE: Ensure exports and saves use the new coordinates
+        // 1. GUARD: Prevent phantom events from destroying the undo stack
+        // If there is no active drag reference, this is a phantom event from unmounting.
+        if (!prevStr) return;
 
-        // Update Nodes array
-        setMiniGridNodes((prev) =>
-          prev.map((n) =>
-            n.name === point.name ? { ...n, lat: finalLat, lng: finalLng } : n
-          )
+        // The prevStr holds the final valid position from the last 'drag' tick
+        const [finalLat, finalLng] = prevStr.split(',').map(Number);
+
+        // Snap the visual marker to ensure it rests exactly on the valid coords
+        marker.position = { lat: finalLat, lng: finalLng };
+
+        // 2. Grab the absolute latest state to avoid stale closures
+        const current = stateRef.current;
+
+        // 2. Calculate newly updated arrays synchronously
+        const updatedNodes = current.miniGridNodes.map((n) =>
+          n.name === point.name ? { ...n, lat: finalLat, lng: finalLng } : n
         );
 
-        // Update Input Points array
-        setDataPoints((prev) =>
-          prev.map((p) =>
-            p.name === point.name ? { ...p, lat: finalLat, lng: finalLng } : p
-          )
+        const updatedPoints = current.dataPoints.map((p) =>
+          p.name === point.name ? { ...p, lat: finalLat, lng: finalLng } : p
         );
 
-        // Update Edges array (so the new line lengths and connections are saved)
-        setMiniGridEdges((prev) =>
-          prev.map((edge) => {
-            // Identify if the dragged point was the start or end of this edge
-            // using the original pre-drag coordinates stored in the `point` closure
-            const isStart =
-              Math.abs(edge.start.lat - point.lat) < 1e-9 &&
-              Math.abs(edge.start.lng - point.lng) < 1e-9;
+        const updatedEdges = current.miniGridEdges.map((edge) => {
+          // Identify if the dragged point was the start or end of this edge
+          const isStart =
+            Math.abs(edge.start.lat - point.lat) < 1e-9 &&
+            Math.abs(edge.start.lng - point.lng) < 1e-9;
 
-            const isEnd =
-              Math.abs(edge.end.lat - point.lat) < 1e-9 &&
-              Math.abs(edge.end.lng - point.lng) < 1e-9;
+          const isEnd =
+            Math.abs(edge.end.lat - point.lat) < 1e-9 &&
+            Math.abs(edge.end.lng - point.lng) < 1e-9;
 
-            if (isStart || isEnd) {
-              const newStart = isStart
-                ? { lat: finalLat, lng: finalLng }
-                : edge.start;
-              const newEnd = isEnd
-                ? { lat: finalLat, lng: finalLng }
-                : edge.end;
+          if (isStart || isEnd) {
+            const newStart = isStart
+              ? { lat: finalLat, lng: finalLng }
+              : edge.start;
+            const newEnd = isEnd ? { lat: finalLat, lng: finalLng } : edge.end;
 
-              return {
-                ...edge,
-                start: newStart,
-                end: newEnd,
-                lengthMeters: haversineDistance(
-                  newStart.lat,
-                  newStart.lng,
-                  newEnd.lat,
-                  newEnd.lng
-                ),
-              };
-            }
-            return edge;
-          })
-        );
+            return {
+              ...edge,
+              start: newStart,
+              end: newEnd,
+              lengthMeters: haversineDistance(
+                newStart.lat,
+                newStart.lng,
+                newEnd.lat,
+                newEnd.lng
+              ),
+            };
+          }
+          return edge;
+        });
+
+        // 3. Update React State with the newly calculated arrays
+        setMiniGridNodes(updatedNodes);
+        setDataPoints(updatedPoints);
+        setMiniGridEdges(updatedEdges);
+
+        // 4. Save to History EXACTLY the fresh state you just calculated
+        current.saveState({
+          dataPoints: updatedPoints,
+          miniGridNodes: updatedNodes,
+          miniGridEdges: updatedEdges,
+          costBreakdown: current.costBreakdown,
+        });
 
         markerDragRef.current = null;
       });
 
-      marker.addListener('contextmenu', () => {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.position = 'absolute';
+      deleteBtn.style.top = '-2px';
+      deleteBtn.style.right = '-2px';
+      deleteBtn.style.background = '#ef4444';
+      deleteBtn.style.color = 'white';
+      deleteBtn.style.border = 'none';
+      deleteBtn.style.borderRadius = '9999px';
+      deleteBtn.style.width = '10px';
+      deleteBtn.style.height = '10px';
+      deleteBtn.style.fontSize = '10px';
+      deleteBtn.style.lineHeight = '1';
+      deleteBtn.style.cursor = 'pointer';
+      deleteBtn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         if (confirm(`Delete ${point.name}?`)) {
           handleRemovePoint(point.name);
         }
       });
 
+      content.appendChild(deleteBtn);
+
       return marker;
     },
-    [allowDragTerminals, lowVoltageCost, highVoltageCost, poleCount]
+    []
   );
 
   const [sidebarWidth, setSidebarWidth] = useState(500); // default width
@@ -569,6 +679,7 @@ export default function DemoPage() {
           locations: false,
           solver_cost: true,
           export: false,
+          savedGrids: false,
         });
       }
     );
@@ -609,7 +720,7 @@ export default function DemoPage() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing]);
+  });
   // ==================== SOLVERS & PARAMETERS ====================
   useEffect(() => {
     fetch(
@@ -662,10 +773,6 @@ export default function DemoPage() {
   }, [map, miniGridEdges]);
 
   // ==================== FILE HANDLING, SOLVER, etc. ====================
-  // Copy all your existing functions here:
-  // handleFileUpload, processFile, parseKml, generateTestData, handleRunSolver,
-  // downloadKml, loadSavedRun, handleSaveToDatabase, handleDeleteRun, etc.
-  // Fetch saved runs when user is logged in
   const getSolversURL =
     process.env.NEXT_PUBLIC_GET_SOLVERS || 'http://localhost:8000/solvers';
 
@@ -690,33 +797,37 @@ export default function DemoPage() {
     fetchSaved();
   }, [session?.user?.id]);
 
+  // ==================== MARKER RENDERING ====================
   useEffect(() => {
     if (!map) return;
 
-    // 1. Clear everything first
+    // Clear old markers safely
     markersRef.current.forEach((marker) => {
+      google.maps.event.clearInstanceListeners(marker);
       marker.map = null;
     });
     markersRef.current = [];
 
-    // --- CHANGE START ---
-    // Combine dataPoints (raw/test data) and miniGridNodes (solver results/manual points)
-    // We use a Map keyed by name to ensure we don't render the same point twice
-    // if it exists in both arrays.
-    const uniquePoints = new Map();
+    // Combine points - miniGridNodes has priority
+    const allPointsMap = new Map<string, MiniGridNode | MarkerPoint>();
 
-    dataPoints.forEach((p) => uniquePoints.set(p.name, p));
-    miniGridNodes.forEach((n) => uniquePoints.set(n.name, n));
+    miniGridNodes.forEach((node) => {
+      if (node?.name) allPointsMap.set(node.name, node);
+    });
 
-    const pointsToShow = Array.from(uniquePoints.values());
-    // --- CHANGE END ---
+    dataPoints.forEach((point) => {
+      if (point?.name && !allPointsMap.has(point.name)) {
+        allPointsMap.set(point.name, point);
+      }
+    });
+
+    const pointsToShow = Array.from(allPointsMap.values());
 
     if (pointsToShow.length === 0) return;
 
     const bounds = new google.maps.LatLngBounds();
     let hasValidPoints = false;
 
-    // 3. Create markers
     pointsToShow.forEach((point) => {
       if (isNaN(point.lat) || isNaN(point.lng)) return;
 
@@ -727,7 +838,7 @@ export default function DemoPage() {
           lat: point.lat,
           lng: point.lng,
           name: point.name,
-          type: 'type' in point ? point.type : undefined,
+          type: point.type,
         },
         map
       );
@@ -736,20 +847,13 @@ export default function DemoPage() {
       bounds.extend({ lat: point.lat, lng: point.lng });
     });
 
-    // 4. Fit bounds logic...
-    if (hasValidPoints && !bounds.isEmpty()) {
-      // Only auto-zoom if this is the FIRST time we are seeing points
-      // (prevents the map from jumping every time you click to add one)
-      if (
-        markersRef.current.length === pointsToShow.length &&
-        pointsToShow.length <= selectedCount + 1
-      ) {
-        setTimeout(() => {
-          map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
-        }, 150);
-      }
+    // Auto-fit when appropriate
+    if (hasValidPoints && pointsToShow.length <= 20) {
+      setTimeout(() => {
+        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+      }, 100);
     }
-  }, [map, dataPoints, miniGridNodes]);
+  }, [map, miniGridNodes, dataPoints, createMarker]);
 
   useEffect(() => {
     fetch(getSolversURL)
@@ -771,51 +875,36 @@ export default function DemoPage() {
     setParamValues(initialValues);
   }, [selectedSolver, selectedSolverName]);
 
-  const handleRemovePoint = useCallback(
-    (pointName: string) => {
-      // 1. Remove from the raw input list
-      setDataPoints((prev) => prev.filter((p) => p.name !== pointName));
-
-      // 2. Remove from the active visualization (priority list)
-      setMiniGridNodes((prev) => prev.filter((n) => n.name !== pointName));
-
-      // 3. Optional: Clear edges if the grid is now "broken"
-      setMiniGridEdges((prev) =>
-        prev.filter((edge) =>
-          // Keep only edges where both ends still exist in the new node list
-          dataPoints.some(
-            (p) => p.lat === edge.start.lat && p.lng === edge.start.lng
-          )
-        )
-      );
-    },
-    [dataPoints]
-  );
-
   const handleConfirmNewPoint = () => {
     if (!pendingPoint) return;
 
-    const newLocation: LocationPoint = {
+    const newLocation: MarkerPoint = {
       name: newPointDetails.name,
       type: newPointDetails.type,
       lat: pendingPoint.lat,
       lng: pendingPoint.lng,
     };
 
-    // 1. Update the raw input data (for future solver runs)
-    setDataPoints((prev) => [...prev, newLocation]);
+    const updatedPoints = [...dataPoints, newLocation];
+    const updatedNodes: MiniGridNode[] = [
+      ...miniGridNodes,
+      { ...newLocation, index: miniGridNodes.length },
+    ];
 
-    // 2. Merge into the active display nodes (so it shows up immediately)
-    // We give it an index based on the current length to avoid conflicts
-    setMiniGridNodes((prev) => {
-      const newNode: MiniGridNode = {
-        ...newLocation,
-        index: prev.length,
-      };
-      return [...prev, newNode];
-    });
+    // Update React State
+    setDataPoints(updatedPoints);
+    setMiniGridNodes(updatedNodes);
 
-    // 3. Reset UI state
+    // Save to History (Pass the updated arrays directly)
+    saveState(
+      captureState({
+        dataPoints: updatedPoints,
+        miniGridNodes: updatedNodes,
+        miniGridEdges: [...miniGridEdges],
+        costBreakdown: { ...costBreakdown },
+      })
+    );
+
     setIsAddPointDialogOpen(false);
     setPendingPoint(null);
   };
@@ -830,7 +919,7 @@ export default function DemoPage() {
       return;
     }
 
-    const newPoint: LocationPoint = {
+    const newPoint: MarkerPoint = {
       name: manualPoint.name || `Manual Point ${dataPoints.length + 1}`,
       type: manualPoint.type,
       lat: lat,
@@ -841,6 +930,10 @@ export default function DemoPage() {
 
     // Reset form
     setManualPoint({ name: '', lat: '', lng: '', type: 'terminal' });
+
+    setAllowDragTerminals(true);
+
+    saveState(captureState({}));
   };
 
   // Enhanced parseKml to handle solved KMLs
@@ -1009,8 +1102,6 @@ export default function DemoPage() {
       }
     });
 
-    console.log('Parsed KML:', { nodes, edges, costBreakdown });
-
     return { nodes, edges, costBreakdown };
   };
 
@@ -1025,12 +1116,13 @@ export default function DemoPage() {
       locations: false,
       solver_cost: true,
       export: false,
+      savedGrids: false,
     });
   };
 
   const processFile = (file: File) => {
+    // Clear old visuals immediately (no saveState yet)
     setMiniGridEdges([]);
-    setOriginalDataPoints([]);
     setMiniGridNodes([]);
     setCostBreakdown({
       lowVoltageMeters: 0,
@@ -1061,97 +1153,88 @@ export default function DemoPage() {
         try {
           const parsed = parseKml(text);
 
-          console.log('Parsed KML:', parsed);
-
           if (parsed.nodes.length === 0 && parsed.edges.length === 0) {
             setError('No valid data found in the KML file.');
-            setDataPoints([]);
-            setOriginalDataPoints([]);
-            setMiniGridNodes([]);
-            setMiniGridEdges([]);
-            setCostBreakdown({
-              lowVoltageMeters: 0,
-              highVoltageMeters: 0,
-              totalMeters: 0,
-              lowWireCost: 0,
-              highWireCost: 0,
-              wireCost: 0,
-              poleCount: 0,
-              poleCost: 0,
-              pointCount: 0,
-              grandTotal: 0,
-            });
-          } else {
-            // Filter valid nodes (exclude any placeholder/summary nodes)
-            const validNodes = parsed.nodes
-              .filter((n) => !isNaN(n.lat) && !isNaN(n.lng))
-              .map((n, idx) => ({
-                ...n,
-                index: n.index >= 0 ? n.index : idx, // fallback to array position if -1
-              }));
-
-            console.log('Valid nodes:', validNodes);
-
-            // Full solved state: show all nodes (including poles) and edges
-            setMiniGridNodes(validNodes);
-            setMiniGridEdges(parsed.edges);
-
-            // Original input points = only source + terminal (no poles)
-            const originalPoints: LocationPoint[] = validNodes
-              .filter((n) => n.type !== 'pole')
-              .map((n) => ({
-                name: n.name,
-                type: n.type,
-                lat: n.lat,
-                lng: n.lng,
-              }));
-
-            setDataPoints(originalPoints);
-            setOriginalDataPoints(originalPoints);
-
-            console.log('After KML load ────────────────────────────────');
-            console.log('miniGridNodes:', miniGridNodes); // should have poles + sources/terminals
-            console.log('miniGridEdges:', miniGridEdges); // should have voltage + lengthMeters
-            console.log('dataPoints:', dataPoints); // should have only source + terminals
-            console.log('costBreakdown:', costBreakdown);
-            console.log('selectedSolverName still:', selectedSolverName);
-
-            // Restore solver if present
-            if (parsed.costBreakdown) {
-              setCostBreakdown(parsed.costBreakdown);
-
-              // Back-calculate per-unit solver (with fallback defaults)
-              const cb = parsed.costBreakdown;
-
-              setPoleCost(
-                cb.usedPoleCost ||
-                  cb.poleCost / Math.max(cb.poleCount, 1) ||
-                  100
-              );
-
-              const lowM = cb.lowVoltageMeters || 0;
-              setLowVoltageCost(lowM > 0 ? cb.lowWireCost / lowM : 10);
-
-              const highM = cb.highVoltageMeters || 0;
-              setHighVoltageCost(highM > 0 ? cb.highWireCost / highM : 20);
-            }
-
-            // Optional: auto-fit map to loaded nodes
-            setTimeout(() => {
-              if (map && validNodes.length > 0) {
-                const bounds = new google.maps.LatLngBounds();
-                validNodes.forEach((n) =>
-                  bounds.extend({ lat: n.lat, lng: n.lng })
-                );
-                map.fitBounds(bounds, {
-                  bottom: 80,
-                  left: 80,
-                  right: 80,
-                  top: 80,
-                });
-              }
-            }, 300);
+            setLoading(false);
+            return;
           }
+
+          // Filter and prepare the exact state we will save
+          const validNodes = parsed.nodes
+            .filter((n) => !isNaN(n.lat) && !isNaN(n.lng))
+            .map((n, idx) => ({
+              ...n,
+              index: n.index >= 0 ? n.index : idx,
+            }));
+
+          const originalPoints: MarkerPoint[] = validNodes
+            .filter((n) => n.type !== 'pole')
+            .map((n) => ({
+              name: n.name,
+              type: n.type,
+              lat: n.lat,
+              lng: n.lng,
+            }));
+
+          const newCostBreakdown = parsed.costBreakdown || {
+            lowVoltageMeters: 0,
+            highVoltageMeters: 0,
+            totalMeters: 0,
+            lowWireCost: 0,
+            highWireCost: 0,
+            wireCost: 0,
+            poleCount: 0,
+            poleCost: 0,
+            pointCount: 0,
+            grandTotal: 0,
+          };
+
+          // ─────────────────────────────────────────────────────
+          // UPDATE UI STATE
+          // ─────────────────────────────────────────────────────
+          setMiniGridNodes(validNodes);
+          setMiniGridEdges(parsed.edges);
+          setDataPoints(originalPoints);
+          setOriginalDataPoints(originalPoints);
+          setCostBreakdown(newCostBreakdown);
+
+          // Restore per-unit costs if they were saved in the KML
+          if (parsed.costBreakdown) {
+            const cb = parsed.costBreakdown;
+            setPoleCost(
+              cb.usedPoleCost || cb.poleCost / Math.max(cb.poleCount, 1) || 100
+            );
+            const lowM = cb.lowVoltageMeters || 0;
+            setLowVoltageCost(lowM > 0 ? cb.lowWireCost / lowM : 10);
+            const highM = cb.highVoltageMeters || 0;
+            setHighVoltageCost(highM > 0 ? cb.highWireCost / highM : 20);
+          }
+
+          // Auto-fit map
+          setTimeout(() => {
+            if (map && validNodes.length > 0) {
+              const bounds = new google.maps.LatLngBounds();
+              validNodes.forEach((n) =>
+                bounds.extend({ lat: n.lat, lng: n.lng })
+              );
+              map.fitBounds(bounds, {
+                bottom: 80,
+                left: 80,
+                right: 80,
+                top: 80,
+              });
+            }
+          }, 300);
+
+          // ─────────────────────────────────────────────────────
+          // SAVE THE CORRECT NEW STATE TO HISTORY (this fixes redo)
+          // ─────────────────────────────────────────────────────
+          saveState({
+            dataPoints: originalPoints,
+            miniGridNodes: validNodes,
+            miniGridEdges: parsed.edges,
+            costBreakdown: newCostBreakdown,
+          });
         } catch (err) {
           setError('Error parsing KML file.');
           console.error(err);
@@ -1159,13 +1242,14 @@ export default function DemoPage() {
           setLoading(false);
         }
       };
+
       reader.onerror = () => {
         setError('Failed to read KML file.');
         setLoading(false);
       };
       reader.readAsText(file);
     } else {
-      // ── CSV branch (PapaParse) ─────────────────────────
+      // ── CSV branch ─────────────────────────────────────
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
@@ -1174,7 +1258,7 @@ export default function DemoPage() {
           try {
             const rows = result.data as Record<string, string>[];
 
-            const parsedPoints: LocationPoint[] = rows
+            const parsedPoints: MarkerPoint[] = rows
               .map((row) => {
                 const name = row.name?.trim() || row['name'] || 'Unnamed';
                 const typeStr = row.type?.trim() || row['type'] || 'terminal';
@@ -1191,18 +1275,39 @@ export default function DemoPage() {
 
                 return { name, type, lat, lng };
               })
-              .filter((p): p is LocationPoint => p !== null);
-
-            console.log('Parsed CSV:', parsedPoints);
+              .filter((p): p is MarkerPoint => p !== null);
 
             if (parsedPoints.length === 0) {
               setError(
                 'No valid rows found. Expected columns: Name, Type (source/terminal), Latitude, Longitude.'
               );
-              setDataPoints([]);
             } else {
+              // ─────────────────────────────────────────────────────
+              // UPDATE UI STATE
+              // ─────────────────────────────────────────────────────
               setDataPoints(parsedPoints);
               setOriginalDataPoints(parsedPoints);
+
+              // ─────────────────────────────────────────────────────
+              // SAVE THE CORRECT NEW STATE TO HISTORY (this fixes redo)
+              // ─────────────────────────────────────────────────────
+              saveState({
+                dataPoints: parsedPoints,
+                miniGridNodes: [], // CSV has no poles/edges yet
+                miniGridEdges: [],
+                costBreakdown: {
+                  lowVoltageMeters: 0,
+                  highVoltageMeters: 0,
+                  totalMeters: 0,
+                  lowWireCost: 0,
+                  highWireCost: 0,
+                  wireCost: 0,
+                  poleCount: 0,
+                  poleCost: 0,
+                  pointCount: 0,
+                  grandTotal: 0,
+                },
+              });
             }
           } catch (err) {
             setError('Error parsing CSV file.');
@@ -1221,7 +1326,7 @@ export default function DemoPage() {
   };
 
   const generateTestData = (count: number) => {
-    // Reset anything derived from the previous data
+    // First, clear old derived state (but do NOT save yet)
     setMiniGridEdges([]);
     setSolverOriginalCost(0);
     setCostBreakdown({
@@ -1239,34 +1344,24 @@ export default function DemoPage() {
     setCalcError(null);
     setError(null);
     setFileName(null);
-    setDataPoints([]);
-    setAllowDragTerminals(true);
 
-    // Generate random points within a 100 square mile area
-    // 100 square miles is roughly 10 miles x 10 miles
-    // 1 degree latitude ≈ 69 miles, so 10 miles ≈ 0.145 degrees,
-    // 0.001 degrees ≈ 0.07 miles - more on the scale of the mini grids
-    // Longitude degrees vary with latitude, but we'll use a center point
-    const centerLat = 33.77728650419152; // Georgia Tech campus, Atlanta, GA
+    // Generate the new points
+    const centerLat = 33.77728650419152;
     const centerLng = -84.39617097270636;
-    const latRange = 0.001; // small
-    const lngRange = 0.001 / Math.cos((centerLat * Math.PI) / 180); // Adjust for longitude compression
+    const latRange = 0.001;
+    const lngRange = 0.001 / Math.cos((centerLat * Math.PI) / 180);
 
-    const points: LocationPoint[] = [];
-    const maxAttempts = count * 10; // Prevent infinite loops
+    const points: MarkerPoint[] = [];
+    const maxAttempts = count * 10;
     let attempts = 0;
 
     while (points.length < count && attempts < maxAttempts) {
-      // Generate coordinates with high precision
-
       const latOffset = (Math.random() - 0.5) * latRange * 2;
       const lngOffset = (Math.random() - 0.5) * lngRange * 2;
 
-      // Maintain high precision by using more decimal places in calculation
       const lat = parseFloat((centerLat + latOffset).toFixed(8));
       const lng = parseFloat((centerLng + lngOffset).toFixed(8));
 
-      // Check for duplicates (within 0.0001 degrees ≈ 30 feet)
       const isDuplicate = points.some(
         (point) =>
           Math.abs(point.lat - lat) < 0.0001 &&
@@ -1280,28 +1375,55 @@ export default function DemoPage() {
             ? 'Source'
             : `Terminal ${String(points.length + 1).padStart(2, '0')}`;
 
-        points.push({
-          name: name,
-          type,
-          lat,
-          lng,
-        });
+        points.push({ name, type, lat, lng });
       }
       attempts++;
     }
 
     if (points.length < count) {
-      throw new Error(
-        `Could not generate ${count} unique locations within the 100 square mile area. Try a smaller number of points.`
-      );
+      throw new Error(`Could not generate ${count} unique locations.`);
     }
-    setOriginalDataPoints(points);
-    setDataPoints(points);
+
+    const newDataPoints = points; // we already have the array
+    const newOriginalDataPoints = points;
+
+    const newState = {
+      dataPoints: newDataPoints,
+      miniGridNodes: [], // you clear these
+      miniGridEdges: [],
+      costBreakdown: {
+        lowVoltageMeters: 0,
+        highVoltageMeters: 0,
+        totalMeters: 0,
+        lowWireCost: 0,
+        highWireCost: 0,
+        wireCost: 0,
+        poleCount: 0,
+        poleCost: 0,
+        pointCount: 0,
+        grandTotal: 0,
+      },
+    };
+
+    // Now update the UI
+    setDataPoints(newDataPoints);
+    setOriginalDataPoints(newOriginalDataPoints);
+    setMiniGridNodes([]);
+    setMiniGridEdges([]);
+    setCostBreakdown(newState.costBreakdown);
+    setFileName(null);
+    // ... other set calls ...
+
     setExpandedSections({
       locations: false,
       solver_cost: true,
       export: false,
+      savedGrids: false,
     });
+    setAllowDragTerminals(true);
+
+    // Save the CORRECT new state
+    saveState(newState);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1384,10 +1506,7 @@ export default function DemoPage() {
   };
 
   const handleRunSolver = async () => {
-    let pointsToSend: LocationPoint[];
-
-    console.log('Running solver with dataPoints:', dataPoints);
-    console.log('miniGridNodes:', miniGridNodes);
+    let pointsToSend: MarkerPoint[];
 
     if (useExistingPoles && dataPoints.length > 0) {
       // Send ALL nodes (including poles) as fixed points
@@ -1434,14 +1553,8 @@ export default function DemoPage() {
     }); // ← clear previous breakdown
     setCalcError(null);
 
-    setAllowDragTerminals(false);
-
     const backendUrl =
       process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000/solve';
-
-    console.log(process.env.NEXT_PUBLIC_BACKEND_URL);
-
-    console.log('Sending request to:', backendUrl);
 
     const startTime = performance.now();
     const debug = 0;
@@ -1488,8 +1601,6 @@ export default function DemoPage() {
       // ────────────────────────────────────────────────
       // Backend now already gives us everything we need
       // ────────────────────────────────────────────────
-      const edges = data.edges || [];
-
       // Use pre-computed values from backend
       const {
         totalLowVoltageMeters = 0,
@@ -1504,37 +1615,54 @@ export default function DemoPage() {
         usedCosts, // optional – for display/debug
       } = data;
 
-      setMiniGridNodes(data.nodes || []);
+      // ─────────────────────────────────────────────────────────────
+      //  BUILD THE NEW STATE SNAPSHOT FIRST (before any setState)
+      // ─────────────────────────────────────────────────────────────
+      const newMiniGridNodes = data.nodes || [];
+      const newMiniGridEdges = (data.edges || []).map((e: MiniGridEdge) => ({
+        start: e.start,
+        end: e.end,
+        lengthMeters: e.lengthMeters ?? 0,
+        voltage: e.voltage ?? 'low',
+      }));
 
-      // Update edges (now includes lengthMeters & voltage)
-      setMiniGridEdges(
-        edges.map((e: MiniGridEdge) => ({
-          start: e.start,
-          end: e.end,
-          lengthMeters: e.lengthMeters ?? 0,
-          voltage: e.voltage ?? 'low',
-        }))
-      );
-
-      // Update cost breakdown state – directly from backend
-      setCostBreakdown({
+      const newCostBreakdown = {
         lowVoltageMeters: totalLowVoltageMeters,
         highVoltageMeters: totalHighVoltageMeters,
         totalMeters: totalLowVoltageMeters + totalHighVoltageMeters,
-
         lowWireCost: lowWireCostEstimate,
         highWireCost: highWireCostEstimate,
         wireCost: totalWireCostEstimate,
-
         poleCount: numPolesUsed,
         poleCost: poleCostEstimate,
         pointCount: pointCount,
-
         grandTotal: totalCostEstimate,
-
         usedPoleCost: usedCosts?.poleCost,
         usedLowCostPerMeter: usedCosts?.lowVoltageCostPerMeter,
         usedHighCostPerMeter: usedCosts?.highVoltageCostPerMeter,
+      };
+
+      const newDataPoints: MarkerPoint[] = newMiniGridNodes
+        .filter((n: MiniGridNode) => n.type !== 'pole')
+        .map((n: MiniGridNode) => ({
+          name: n.name,
+          type: n.type,
+          lat: n.lat,
+          lng: n.lng,
+        }));
+
+      // Now update React state
+      setDataPoints(newDataPoints);
+      setMiniGridNodes(newMiniGridNodes);
+      setMiniGridEdges(newMiniGridEdges);
+      setCostBreakdown(newCostBreakdown);
+
+      // Save the CORRECT solved state to history
+      saveState({
+        dataPoints: [...dataPoints], // input points usually don't change
+        miniGridNodes: newMiniGridNodes,
+        miniGridEdges: newMiniGridEdges,
+        costBreakdown: newCostBreakdown,
       });
 
       setSolverOriginalCost(totalCostEstimate);
@@ -1551,6 +1679,7 @@ export default function DemoPage() {
       locations: false,
       solver_cost: false,
       export: true,
+      savedGrids: false,
     });
   };
 
@@ -1806,7 +1935,10 @@ export default function DemoPage() {
       locations: false,
       solver_cost: false,
       export: true,
+      savedGrids: false,
     });
+
+    saveState(captureState());
   };
 
   const handleDeleteRun = async (runId: string, runName?: string) => {
@@ -1888,6 +2020,13 @@ export default function DemoPage() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to save mini-grid');
       }
+
+      setExpandedSections({
+        locations: false,
+        solver_cost: false,
+        export: false,
+        savedGrids: true,
+      });
 
       alert('Mini-grid saved successfully!');
 
@@ -1982,14 +2121,14 @@ export default function DemoPage() {
           {/* Scrollable Content - Added pt-24 to clear the hamburger menu */}
           <div className='h-full overflow-y-auto p-6 pt-24'>
             <div className='space-y-12'>
-              {/* 1. Define Locations Section */}
+              {/* 1. Define Marker Section */}
               <section>
                 <button
                   onClick={() => toggleSection('locations')}
                   className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
                 >
                   <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
-                    1. Define Locations Options
+                    1. Define Markers
                   </h2>
                   <svg
                     className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.locations ? 'rotate-180' : ''}`}
@@ -2009,10 +2148,114 @@ export default function DemoPage() {
                 {expandedSections.locations && (
                   <div className='space-y-4'>
                     {/* Click to Set Marker*/}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 text-center backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <p className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Click on Map to add Marker Manually
+                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
+                      <p className='text-sm'>
+                        <i>Click on the map to place a marker at any time.</i>
                       </p>
+                      <p className='text-sm'>
+                        <i>
+                          Drag markers to adjust placement. Edges cannot exceed
+                          30 meters
+                        </i>
+                      </p>
+                    </div>
+
+                    {/* Generate Test Data Card */}
+                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
+                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
+                        Generate Test Data
+                      </h3>
+                      <p className='mb-4 text-sm leading-snug text-zinc-400'>
+                        Random points in ~1 mi² area – good for quick testing
+                      </p>
+
+                      <div className='flex flex-wrap items-center gap-4'>
+                        <select
+                          value={selectedCount}
+                          onChange={(e) =>
+                            setSelectedCount(Number(e.target.value))
+                          }
+                          className='min-w-35 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          disabled={loading}
+                        >
+                          {Array.from({ length: 91 }, (_, i) => i + 10).map(
+                            (n) => (
+                              <option key={n} value={n}>
+                                {n} points
+                              </option>
+                            )
+                          )}
+                        </select>
+
+                        <button
+                          onClick={async () => {
+                            if (loading) return;
+                            setLoading(true);
+                            setDataPoints([]); // ← immediate visual clear
+                            setMiniGridNodes([]);
+                            setMiniGridEdges([]);
+                            setError(null); // clear previous errors
+
+                            try {
+                              await generateTestData(selectedCount); // ← make sure this is async if it does any async work
+                              console.log(
+                                `Generated ${selectedCount} test points successfully`
+                              );
+                            } catch (err) {
+                              const msg =
+                                err instanceof Error
+                                  ? err.message
+                                  : 'Failed to generate test data';
+                              setError(msg);
+                              console.error(
+                                'Test data generation failed:',
+                                err
+                              );
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                          disabled={loading}
+                          className={`rounded-lg px-6 py-2.5 text-sm font-medium text-zinc-900 transition-all dark:text-white ${
+                            loading
+                              ? 'cursor-wait bg-blue-700/60'
+                              : 'bg-blue-600 shadow-sm hover:bg-blue-700 active:scale-97'
+                          } `}
+                        >
+                          {loading ? (
+                            <span className='flex items-center gap-2'>
+                              <svg
+                                className='h-4 w-4 animate-spin'
+                                viewBox='0 0 24 24'
+                              >
+                                <circle
+                                  className='opacity-25'
+                                  cx='12'
+                                  cy='12'
+                                  r='10'
+                                  stroke='currentColor'
+                                  strokeWidth='4'
+                                  fill='none'
+                                />
+                                <path
+                                  className='opacity-75'
+                                  fill='currentColor'
+                                  d='M4 12a8 8 0 018-8v8h8a8 8 0 01-16 0z'
+                                />
+                              </svg>
+                              Generating…
+                            </span>
+                          ) : (
+                            'Generate'
+                          )}
+                        </button>
+                      </div>
+                      {/* Error display (if any) */}
+                      {error && (
+                        <p className='mt-3 text-center text-sm text-red-400'>
+                          {error}
+                        </p>
+                      )}
                     </div>
 
                     {/* Upload File*/}
@@ -2170,108 +2413,10 @@ export default function DemoPage() {
                       </div>
                     </div>
 
-                    {/* Generate Test Data Card */}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Generate Test Data
-                      </h3>
-                      <p className='mb-4 text-sm leading-snug text-zinc-400'>
-                        Random points in ~1 mi² area – good for quick testing
-                      </p>
-
-                      <div className='flex flex-wrap items-center gap-4'>
-                        <select
-                          value={selectedCount}
-                          onChange={(e) =>
-                            setSelectedCount(Number(e.target.value))
-                          }
-                          className='min-w-35 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                          disabled={loading}
-                        >
-                          {Array.from({ length: 91 }, (_, i) => i + 10).map(
-                            (n) => (
-                              <option key={n} value={n}>
-                                {n} points
-                              </option>
-                            )
-                          )}
-                        </select>
-
-                        <button
-                          onClick={async () => {
-                            if (loading) return;
-                            setLoading(true);
-                            setDataPoints([]); // ← immediate visual clear
-                            setMiniGridNodes([]);
-                            setMiniGridEdges([]);
-                            setError(null); // clear previous errors
-
-                            try {
-                              await generateTestData(selectedCount); // ← make sure this is async if it does any async work
-                              console.log(
-                                `Generated ${selectedCount} test points successfully`
-                              );
-                            } catch (err) {
-                              const msg =
-                                err instanceof Error
-                                  ? err.message
-                                  : 'Failed to generate test data';
-                              setError(msg);
-                              console.error(
-                                'Test data generation failed:',
-                                err
-                              );
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                          disabled={loading}
-                          className={`rounded-lg px-6 py-2.5 text-sm font-medium text-zinc-900 transition-all dark:text-white ${
-                            loading
-                              ? 'cursor-wait bg-blue-700/60'
-                              : 'bg-blue-600 shadow-sm hover:bg-blue-700 active:scale-97'
-                          } `}
-                        >
-                          {loading ? (
-                            <span className='flex items-center gap-2'>
-                              <svg
-                                className='h-4 w-4 animate-spin'
-                                viewBox='0 0 24 24'
-                              >
-                                <circle
-                                  className='opacity-25'
-                                  cx='12'
-                                  cy='12'
-                                  r='10'
-                                  stroke='currentColor'
-                                  strokeWidth='4'
-                                  fill='none'
-                                />
-                                <path
-                                  className='opacity-75'
-                                  fill='currentColor'
-                                  d='M4 12a8 8 0 018-8v8h8a8 8 0 01-16 0z'
-                                />
-                              </svg>
-                              Generating…
-                            </span>
-                          ) : (
-                            'Generate'
-                          )}
-                        </button>
-                      </div>
-                      {/* Error display (if any) */}
-                      {error && (
-                        <p className='mt-3 text-center text-sm text-red-400'>
-                          {error}
-                        </p>
-                      )}
-                    </div>
-
                     {/* Manual Point Card */}
                     <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
                       <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Add Marker Manually
+                        Input Coordinates Manually
                       </h3>
                       <form
                         onSubmit={handleAddManualPoint}
@@ -2348,6 +2493,7 @@ export default function DemoPage() {
                             >
                               <option value='terminal'>Terminal</option>
                               <option value='source'>Source</option>
+                              <option value='source'>Pole</option>
                             </select>
                           </div>
                         </div>
@@ -2359,79 +2505,6 @@ export default function DemoPage() {
                         </button>
                       </form>
                     </div>
-
-                    {/* Saved Runs (conditional) */}
-                    {session?.user && (
-                      <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm lg:col-span-9 xl:col-span-3 dark:bg-zinc-900/50'>
-                        <h3 className='mb-4 text-lg font-semibold text-zinc-100'>
-                          Saved Mini-Grids ({savedRuns.length}/10)
-                        </h3>
-                        {loadingSaved ? (
-                          <p className='py-4 text-sm text-emerald-400'>
-                            Loading…
-                          </p>
-                        ) : savedRuns.length === 0 ? (
-                          <p className='py-4 text-sm text-zinc-500 italic'>
-                            No saved runs yet
-                          </p>
-                        ) : (
-                          <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-73 overflow-y-auto pr-2'>
-                            <div className='grid gap-4 sm:grid-cols-1 md:grid-cols-1 lg:grid-cols-1'>
-                              {savedRuns.map((run) => (
-                                <div
-                                  key={run.id}
-                                  className='group relative cursor-pointer rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 transition-all hover:border-emerald-700/50 hover:bg-zinc-900/60'
-                                  onClick={() => loadSavedRun(run)}
-                                >
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteRun(run.id, run.name);
-                                    }}
-                                    className='absolute top-2 right-2 rounded-full bg-red-900/60 p-1.5 text-red-300 opacity-70 transition hover:opacity-100'
-                                    title='Delete run'
-                                  >
-                                    <svg
-                                      className='h-4 w-4'
-                                      fill='none'
-                                      stroke='currentColor'
-                                      viewBox='0 0 24 24'
-                                    >
-                                      <path
-                                        strokeLinecap='round'
-                                        strokeLinejoin='round'
-                                        strokeWidth={2}
-                                        d='M6 18L18 6M6 6l12 12'
-                                      />
-                                    </svg>
-                                  </button>
-
-                                  <h4 className='truncate font-medium text-emerald-700 group-hover:text-emerald-200 dark:text-emerald-300/90'>
-                                    {run.name || 'Untitled'}
-                                  </h4>
-                                  <p className='mt-1 text-xs text-zinc-500'>
-                                    {run.fileName
-                                      ? `File: ${run.fileName}`
-                                      : 'Test data'}
-                                  </p>
-                                  <p className='mt-0.5 text-xs text-zinc-600'>
-                                    {new Date(run.createdAt).toLocaleString()}
-                                    <br />
-                                    {run.miniGridNodes?.length || '?'} nodes |{' '}
-                                    <span className='font-medium text-green-600'>
-                                      {new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                      }).format(run.costBreakdown.grandTotal)}
-                                    </span>
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
               </section>
@@ -2814,6 +2887,105 @@ export default function DemoPage() {
                   </div>
                 )}
               </section>
+
+              {/* 4. Saved Mini-grids */}
+              <section>
+                <button
+                  onClick={() => toggleSection('savedGrids')}
+                  className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
+                >
+                  <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
+                    Saved Mini-grids ({savedRuns.length}/10)
+                  </h2>
+                  <svg
+                    className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.savedGrids ? 'rotate-180' : ''}`}
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth={2}
+                      d='M19 14l-7 7m0 0l-7-7m7 7V3'
+                    />
+                  </svg>
+                </button>
+
+                {expandedSections.savedGrids && (
+                  <div className='space-y-4'>
+                    {/* Saved Runs (conditional) */}
+                    {session?.user && (
+                      <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm lg:col-span-9 xl:col-span-3 dark:bg-zinc-900/50'>
+                        {loadingSaved ? (
+                          <p className='py-4 text-sm text-emerald-400'>
+                            Loading…
+                          </p>
+                        ) : savedRuns.length === 0 ? (
+                          <p className='py-4 text-sm text-zinc-500 italic'>
+                            No saved runs yet
+                          </p>
+                        ) : (
+                          <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-73 overflow-y-auto pr-2'>
+                            <div className='grid gap-4 sm:grid-cols-1 md:grid-cols-1 lg:grid-cols-1'>
+                              {savedRuns.map((run) => (
+                                <div
+                                  key={run.id}
+                                  className='group relative cursor-pointer rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 transition-all hover:border-emerald-700/50 hover:bg-zinc-900/60'
+                                  onClick={() => loadSavedRun(run)}
+                                >
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteRun(run.id, run.name);
+                                    }}
+                                    className='absolute top-2 right-2 rounded-full bg-red-900/60 p-1.5 text-red-300 opacity-70 transition hover:opacity-100'
+                                    title='Delete run'
+                                  >
+                                    <svg
+                                      className='h-4 w-4'
+                                      fill='none'
+                                      stroke='currentColor'
+                                      viewBox='0 0 24 24'
+                                    >
+                                      <path
+                                        strokeLinecap='round'
+                                        strokeLinejoin='round'
+                                        strokeWidth={2}
+                                        d='M6 18L18 6M6 6l12 12'
+                                      />
+                                    </svg>
+                                  </button>
+
+                                  <h4 className='truncate font-medium text-emerald-700 group-hover:text-emerald-200 dark:text-emerald-300/90'>
+                                    {run.name || 'Untitled'}
+                                  </h4>
+                                  <p className='mt-1 text-xs text-zinc-500'>
+                                    {run.fileName
+                                      ? `File: ${run.fileName}`
+                                      : 'Test data'}
+                                  </p>
+                                  <p className='mt-0.5 text-xs text-zinc-600'>
+                                    {new Date(run.createdAt).toLocaleString()}
+                                    <br />
+                                    {run.miniGridNodes?.length || '?'} nodes |{' '}
+                                    <span className='font-medium text-green-600'>
+                                      {new Intl.NumberFormat('en-US', {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                      }).format(run.costBreakdown.grandTotal)}
+                                    </span>
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
             </div>
 
             <p className='text-center text-xs text-zinc-500 dark:text-zinc-400'>
@@ -2824,27 +2996,98 @@ export default function DemoPage() {
           </div>
         </div>
 
-        {/* Floating Reset Button - Clean positioning */}
-        <button
-          onClick={handleResetMap}
-          disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
-          className='fixed right-15 bottom-6 z-50 flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl hover:bg-red-600 disabled:opacity-50 dark:text-white'
-        >
-          <svg
-            className='h-4 w-4'
-            fill='none'
-            stroke='currentColor'
-            viewBox='0 0 24 24'
+        {/* Floating Action Buttons - Horizontal Row */}
+        <div className='fixed right-16 bottom-5 z-50 flex items-center gap-3'>
+          {/* Undo Button */}
+          <button
+            onClick={() => {
+              const s = undo();
+              if (s) {
+                // You must restore EVERYTHING tracked in HistoryState
+                setDataPoints(s.dataPoints);
+                setMiniGridNodes(s.miniGridNodes);
+                setMiniGridEdges(s.miniGridEdges);
+                setCostBreakdown(s.costBreakdown);
+              }
+            }}
+            disabled={!canUndo}
+            className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
+            title='Undo (Ctrl/Cmd + Z)'
           >
-            <path
-              strokeLinecap='round'
-              strokeLinejoin='round'
-              strokeWidth={2}
-              d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
-            />
-          </svg>
-          Reset
-        </button>
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              className='h-4 w-4'
+              fill='none'
+              viewBox='0 0 24 24'
+              stroke='currentColor'
+              strokeWidth={2.5}
+            >
+              <path
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                d='M3 10h10a8 8 0 018 8v2M3 10l6 6 6-6'
+              />
+            </svg>
+            Undo
+          </button>
+
+          {/* Redo Button */}
+          <button
+            onClick={() => {
+              const s = redo();
+              if (s) {
+                // You must restore EVERYTHING tracked in HistoryState
+                setDataPoints(s.dataPoints);
+                setMiniGridNodes(s.miniGridNodes);
+                setMiniGridEdges(s.miniGridEdges);
+                setCostBreakdown(s.costBreakdown);
+              }
+            }}
+            disabled={!canRedo}
+            className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
+            title='Redo (Ctrl/Cmd + Shift + Z)'
+          >
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              className='h-4 w-4'
+              fill='none'
+              viewBox='0 0 24 24'
+              stroke='currentColor'
+              strokeWidth={2.5}
+            >
+              <path
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                d='M21 10h-10a8 8 0 00-8 8v2m18-10l-6 6-6-6'
+              />
+            </svg>
+            Redo
+          </button>
+
+          {/* Reset Button */}
+          <button
+            onClick={handleResetMap}
+            disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
+            className='flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl transition-all hover:bg-red-600 active:scale-95 disabled:opacity-50 dark:text-white'
+            title='Reset everything'
+          >
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              className='h-4 w-4'
+              fill='none'
+              stroke='currentColor'
+              viewBox='0 0 24 24'
+              strokeWidth={2.5}
+            >
+              <path
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
+              />
+            </svg>
+            Reset
+          </button>
+        </div>
 
         {/* FOOTER - Minimal */}
         <footer className='border-t border-zinc-800 bg-zinc-950 py-4 text-center text-xs text-zinc-600'>
@@ -2890,13 +3133,14 @@ export default function DemoPage() {
                 onChange={(e) =>
                   setNewPointDetails({
                     ...newPointDetails,
-                    type: e.target.value as 'source' | 'terminal',
+                    type: e.target.value as 'source' | 'terminal' | 'pole',
                   })
                 }
                 className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
               >
                 <option value='terminal'>Terminal</option>
                 <option value='source'>Source</option>
+                <option value='pole'>Source</option>
               </select>
             </div>
           </div>

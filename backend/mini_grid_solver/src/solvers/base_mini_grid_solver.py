@@ -141,7 +141,7 @@ class BaseMiniGridSolver(ABC):
         data suitable for optimization tasks.
 
         This function processes the input `SolverRequest` to extract coordinates, their names, and classify one of the
-        locations as the "Power Source". It ensures that the input contains at least two valid points, assigns a "Power Source"
+        markers as the "Power Source". It ensures that the input contains at least two valid points, assigns a "Power Source"
         if not explicitly provided, and organizes the remaining points as terminals. The function also validates and cleans input
         data for consistency.
 
@@ -203,7 +203,7 @@ class BaseMiniGridSolver(ABC):
                     print(f"Warning: Multiple potential sources detected; using first (index {source_idx})")
                 else:
                     source_idx = i
-                    names[i] = "Source"  # canonical name
+                    names[i] = name  # canonical name
 
         coords = np.array(coords_list, dtype=np.float64)
 

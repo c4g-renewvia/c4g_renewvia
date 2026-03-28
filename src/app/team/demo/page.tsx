@@ -433,11 +433,20 @@ export default function DemoPage() {
       content.style.alignItems = 'center';
       content.style.position = 'relative';
 
+      const iconWrapper = document.createElement('div');
+      iconWrapper.style.position = 'relative';
+      iconWrapper.style.width = '44px'; // Set to your largest marker width
+      iconWrapper.style.height = '44px'; // Set to your largest marker height
+      iconWrapper.style.display = 'flex';
+      iconWrapper.style.alignItems = 'center';
+      iconWrapper.style.justifyContent = 'center';
+
       const iconImg = document.createElement('img');
       iconImg.src = iconUrl;
       iconImg.style.width = `${scaledSize.width}px`;
       iconImg.style.height = `${scaledSize.height}px`;
-      content.appendChild(iconImg);
+
+      iconWrapper.appendChild(iconImg);
 
       const labelSpan = document.createElement('span');
       labelSpan.textContent = point.name;
@@ -657,9 +666,10 @@ export default function DemoPage() {
 
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = '×';
+      // These coordinates are now relative to the 44x44 wrapper, not the icon size
       deleteBtn.style.position = 'absolute';
-      deleteBtn.style.top = '-2px';
-      deleteBtn.style.right = '-2px';
+      deleteBtn.style.top = '0px';
+      deleteBtn.style.right = '0px';
       deleteBtn.style.background = '#ef4444';
       deleteBtn.style.color = 'white';
       deleteBtn.style.border = 'none';
@@ -679,7 +689,11 @@ export default function DemoPage() {
         }
       });
 
-      content.appendChild(deleteBtn);
+      iconWrapper.appendChild(deleteBtn);
+
+      // 4. Assemble the final marker
+      content.appendChild(iconWrapper); // Wrapper first
+      content.appendChild(labelSpan); // Label second
 
       return marker;
     },
@@ -2009,7 +2023,25 @@ export default function DemoPage() {
       savedGrids: false,
     });
 
-    saveState(captureState());
+    const newState = {
+      dataPoints: run.dataPoints || [],
+      miniGridNodes: run.miniGridNodes || [],
+      miniGridEdges: run.miniGridEdges || [],
+      costBreakdown: run.costBreakdown,
+    };
+
+    // 1. Update React State
+    setDataPoints(newState.dataPoints);
+    setMiniGridNodes(newState.miniGridNodes);
+    setMiniGridEdges(newState.miniGridEdges);
+    setCostBreakdown(newState.costBreakdown);
+
+    // 2. IMPORTANT: If your useMiniGridHistory hook has a 'reset' or 'clear' method,
+    // use it here. Otherwise, pushing a new state via saveState()
+    // will ALWAYS clear the Redo stack by design.
+    saveState(newState);
+
+    alert(`Loaded: ${run.name || 'Mini-grid run'}`);
   };
 
   const handleDeleteRun = async (runId: string, runName?: string) => {
@@ -2198,7 +2230,7 @@ export default function DemoPage() {
                   onClick={() => toggleSection('locations')}
                   className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
                 >
-                  <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
+                  <h2 className='light:text-emerald-700 text-xl font-bold text-emerald-700 dark:text-emerald-300'>
                     1. Define Markers
                   </h2>
                   <svg
@@ -2823,7 +2855,7 @@ export default function DemoPage() {
                   onClick={() => toggleSection('export')}
                   className='mb-6 flex w-full items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-900/20 px-5 py-4 transition-all hover:bg-blue-900/30'
                 >
-                  <h2 className='light:text-blue-700 text-lg font-bold text-blue-700 dark:text-blue-300'>
+                  <h2 className='light:text-blue-700 text-xl font-bold text-blue-700 dark:text-blue-300'>
                     3. Export & Summary
                   </h2>
                   <svg
@@ -3058,7 +3090,9 @@ export default function DemoPage() {
                 )}
               </section>
             </div>
-
+            <br />
+            <hr />
+            <br />
             <p className='text-center text-xs text-zinc-500 dark:text-zinc-400'>
               <a href={'https://forms.gle/Az6j5cjtzJJDEQAEA'} target='_blank'>
                 Give Feedback

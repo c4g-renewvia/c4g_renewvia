@@ -346,6 +346,40 @@ export default function DemoPage() {
     allowDragTerminalsRef.current = allowDragTerminals;
   }, [allowDragTerminals]);
 
+  // ==================== MAP CLICK TO ADD MARKER ====================
+  useEffect(() => {
+    if (!map) return;
+
+    const clickListener = map.addListener(
+      'click',
+      (e: google.maps.MapMouseEvent) => {
+        if (!e.latLng) return;
+
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+
+        // Optional: ignore clicks that are very close to existing markers
+        const tooClose =
+          dataPoints.some(
+            (p) => haversineDistance(p.lat, p.lng, lat, lng) < 5 // ~5 meters
+          ) ||
+          miniGridNodes.some(
+            (n) => haversineDistance(n.lat, n.lng, lat, lng) < 5
+          );
+
+        if (tooClose) return;
+
+        setPendingPoint({ lat, lng });
+        setIsAddPointDialogOpen(true);
+      }
+    );
+
+    // Cleanup
+    return () => {
+      google.maps.event.removeListener(clickListener);
+    };
+  }, [map, dataPoints, miniGridNodes]); // Re-attach if points change (optional)
+
   const handleRemovePoint = useCallback(
     (pointName: string) => {
       // 1. Get the latest state from the Ref to avoid stale closures
@@ -803,22 +837,36 @@ export default function DemoPage() {
   };
 
   // Inside DemoPage component, near your other useEffects
+  // Replace the old useEffect with this one
   useEffect(() => {
-    if (isAddPointDialogOpen) {
-      const type = newPointDetails.type;
+    if (!isAddPointDialogOpen) return;
 
-      // Count how many of this type already exist
-      const count = dataPoints.filter((p) => p.type === type).length;
+    const type = newPointDetails.type;
 
-      // Capitalize first letter for the label
-      const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+    // Combine both arrays and find the highest number for this type
+    const allPoints = [...dataPoints, ...miniGridNodes];
 
-      setNewPointDetails((prev) => ({
-        ...prev,
-        name: `${typeLabel} ${String(count + 1).padStart(2, '0')}`,
-      }));
-    }
-  }, [newPointDetails.type, dataPoints, isAddPointDialogOpen]);
+    const existingNumbers = allPoints
+      .filter((p) => p.type === type)
+      .map((p) => {
+        // Extract number from name like "Terminal 05", "Pole 12", etc.
+        const match = p.name.match(/(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n) => !isNaN(n));
+
+    const maxNumber =
+      existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
+
+    const nextNumber = maxNumber + 1;
+
+    const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+
+    setNewPointDetails((prev) => ({
+      ...prev,
+      name: `${typeLabel} ${String(nextNumber).padStart(2, '0')}`,
+    }));
+  }, [isAddPointDialogOpen, newPointDetails.type, dataPoints, miniGridNodes]);
 
   // 1. Wrap initMap in useCallback to stabilize it
   const initMap = useCallback(() => {
@@ -1514,7 +1562,7 @@ export default function DemoPage() {
         const name =
           points.length === 0
             ? 'Source'
-            : `Terminal ${String(points.length + 1).padStart(2, '0')}`;
+            : `Terminal ${String(points.length).padStart(2, '0')}`;
 
         points.push({ name, type, lat, lng });
       }
@@ -1553,7 +1601,6 @@ export default function DemoPage() {
     setMiniGridEdges([]);
     setCostBreakdown(newState.costBreakdown);
     setFileName(null);
-    // ... other set calls ...
 
     setExpandedSections({
       markers: false,

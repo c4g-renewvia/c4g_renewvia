@@ -836,20 +836,12 @@ export default function DemoPage() {
     document.body.style.userSelect = '';
   };
 
-  // Inside DemoPage component, near your other useEffects
-  // Replace the old useEffect with this one
-  useEffect(() => {
-    if (!isAddPointDialogOpen) return;
-
-    const type = newPointDetails.type;
-
-    // Combine both arrays and find the highest number for this type
+  const getNextNameForType = (type: 'source' | 'terminal' | 'pole'): string => {
     const allPoints = [...dataPoints, ...miniGridNodes];
 
     const existingNumbers = allPoints
       .filter((p) => p.type === type)
       .map((p) => {
-        // Extract number from name like "Terminal 05", "Pole 12", etc.
         const match = p.name.match(/(\d+)$/);
         return match ? parseInt(match[1], 10) : 0;
       })
@@ -857,15 +849,18 @@ export default function DemoPage() {
 
     const maxNumber =
       existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
-
     const nextNumber = maxNumber + 1;
 
     const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+    return `${typeLabel} ${String(nextNumber).padStart(2, '0')}`;
+  };
 
-    setNewPointDetails((prev) => ({
-      ...prev,
-      name: `${typeLabel} ${String(nextNumber).padStart(2, '0')}`,
-    }));
+  // Inside DemoPage component, near your other useEffects
+  // Replace the old useEffect with this one
+  useEffect(() => {
+    if (!isAddPointDialogOpen) return;
+    const nextName = getNextNameForType(newPointDetails.type);
+    setNewPointDetails((prev) => ({ ...prev, name: nextName }));
   }, [isAddPointDialogOpen, newPointDetails.type, dataPoints, miniGridNodes]);
 
   // 1. Wrap initMap in useCallback to stabilize it
@@ -1561,7 +1556,7 @@ export default function DemoPage() {
         const type = points.length === 0 ? 'source' : 'terminal';
         const name =
           points.length === 0
-            ? 'Source'
+            ? 'Source 01'
             : `Terminal ${String(points.length).padStart(2, '0')}`;
 
         points.push({ name, type, lat, lng });

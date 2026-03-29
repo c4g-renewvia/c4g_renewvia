@@ -230,6 +230,10 @@ export default function DemoPage() {
     type: 'terminal' as 'source' | 'terminal' | 'pole',
   });
 
+  const lengthLabelsRef = useRef<google.maps.marker.AdvancedMarkerElement[]>(
+    []
+  );
+
   const [savedRuns, setSavedRuns] = useState<MiniGridRun[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -927,11 +931,20 @@ export default function DemoPage() {
   // ==================== MAP EFFECTS (Markers + Lines) ====================
   useEffect(() => {
     if (!map) return;
+
+    // Clear old polylines
     polylinesRef.current.forEach((line) => line.setMap(null));
     polylinesRef.current = [];
 
+    // Clear old length labels
+    lengthLabelsRef.current.forEach((label) => {
+      label.map = null;
+    });
+    lengthLabelsRef.current = [];
+
     miniGridEdges.forEach((edge) => {
       if (!edge.start || !edge.end) return;
+
       const color =
         edge.voltage === 'high' ? highVoltageColor : lowVoltageColor;
       const weight = edge.voltage === 'high' ? 6 : 4;
@@ -945,16 +958,53 @@ export default function DemoPage() {
         map,
       });
 
-      // NEW: Make the edge clickable for deletion
-      polyline.set('edgeData', { ...edge }); // safe copy
+      polyline.set('edgeData', { ...edge });
       polyline.addListener('click', () => {
         const edgeData = polyline.get('edgeData') as MiniGridEdge;
         if (edgeData) handleDeleteEdge(edgeData);
       });
 
       polylinesRef.current.push(polyline);
+
+      // === NEW: Add length label at midpoint ===
+      const midLat = (edge.start.lat + edge.end.lat) / 2;
+      const midLng = (edge.start.lng + edge.end.lng) / 2;
+
+      const labelContent = document.createElement('div');
+      labelContent.className = 'edge-length-label';
+      labelContent.style.cssText = `
+      background: rgba(0, 0, 0, 0.75);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 9999px;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.2);
+    `;
+      labelContent.textContent = `${formatMeters(edge.lengthMeters)} m`;
+
+      const lengthLabel = new google.maps.marker.AdvancedMarkerElement({
+        position: { lat: midLat, lng: midLng },
+        map,
+        content: labelContent,
+        zIndex: 10, // above polylines
+      });
+
+      lengthLabelsRef.current.push(lengthLabel);
     });
   }, [map, miniGridEdges]);
+
+  useEffect(() => {
+    return () => {
+      lengthLabelsRef.current.forEach((label) => {
+        label.map = null;
+      });
+    };
+  }, []);
 
   // ==================== FILE HANDLING, SOLVER, etc. ====================
   const getSolversURL =
@@ -1034,7 +1084,7 @@ export default function DemoPage() {
     // Auto-fit when appropriate
     if (hasValidPoints && pointsToShow.length <= 20) {
       setTimeout(() => {
-        map.fitBounds(bounds, { bottom: 80, left: 80, right: 80, top: 80 });
+        map.fitBounds(bounds, { bottom: 80, left: 200, right: 80, top: 80 });
       }, 100);
     }
   }, [map, miniGridNodes, dataPoints, createMarker]);

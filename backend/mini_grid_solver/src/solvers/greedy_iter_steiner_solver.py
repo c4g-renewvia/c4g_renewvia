@@ -431,7 +431,7 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
 
         # Constants for Beam Search and Rollout
         BEAM_WIDTH = 3  # Evaluate top 3 immediate candidates deeper
-        ROLLOUT_DEPTH = 2  # Look ahead 1 step beyond the current choice
+        ROLLOUT_DEPTH = 5  # Look ahead 1 step beyond the current choice
         MAX_STAGNATION = 3
         IMPROVEMENT_THRESHOLD = 0.05  # Minimum meters to keep iterating
 

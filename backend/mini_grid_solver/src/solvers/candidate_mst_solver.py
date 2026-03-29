@@ -87,7 +87,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         """
         new_graph = graph.copy()
 
-        # Build a lookup for node attributes currently stored on the graph
+        # Build node data lookup
         node_data_by_index = {
             n: data.copy()
             for n, data in new_graph.nodes(data=True)
@@ -102,7 +102,8 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             length_m = data.get("length", 0.0)
             voltage = data.get("voltage", "unknown")
 
-            if abs(length_m - max_length_m) < 2:
+            # Skip short edges
+            if length_m <= max_length_m + 0.01:   # small floating-point tolerance
                 continue
 
             start_node = node_data_by_index[u]
@@ -112,12 +113,12 @@ class CandidateMSTSolver(BaseMiniGridSolver):
             end_coord = np.array([end_node["lat"], end_node["lng"]], dtype=float)
 
             direction = end_coord - start_coord
-            total_length = length_m
 
-            num_segments = max(2, int(np.floor(total_length / max_length_m)))
-            segment_length = total_length / num_segments
+            # CORRECT way: use ceil so every segment <= max_length_m
+            num_segments = int(np.ceil(length_m / max_length_m))
+            segment_length = length_m / num_segments
 
-            # Replace the original long edge with a chain of shorter edges
+            # Remove the original long edge
             new_graph.remove_edge(u, v)
 
             prev_idx = u
@@ -125,6 +126,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 fraction = i / num_segments
                 current = start_coord + fraction * direction
 
+                # Add new intermediate pole
                 new_graph.add_node(
                     next_index,
                     lat=float(current[0]),
@@ -153,6 +155,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 prev_idx = next_index
                 next_index += 1
 
+            # Final segment to original end node
             new_graph.add_edge(
                 prev_idx,
                 v,

@@ -16,7 +16,7 @@ interface ExportSummaryProps {
   miniGridNodes: MiniGridNode[];
   miniGridEdges: MiniGridEdge[];
   allowDragTerminals: boolean;
-  onAllowDragTerminalsChange: () => void;
+  onAllowDragTerminalsChange: (_allow: boolean) => void; // ← Fixed
   onDownloadKml: () => void;
   onSaveToDatabase: () => void;
   isAuthenticated: boolean;
@@ -64,7 +64,7 @@ export default function ExportSummary({
             type='checkbox'
             id='allow-drag-terminals'
             checked={allowDragTerminals}
-            onChange={(e) => onAllowDragTerminalsChange(e.target.checked)}
+            onChange={(e) => onAllowDragTerminalsChange(e.target.checked)} // ← Now correct
             className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
           />
           <label

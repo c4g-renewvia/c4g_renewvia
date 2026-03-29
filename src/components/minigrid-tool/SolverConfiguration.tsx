@@ -21,7 +21,7 @@ interface SolverConfigurationProps {
   selectedSolverName: string;
   onSolverChange: (_solverName: string) => void;
   paramValues: Record<string, number>;
-  onParamChange: (_paramName: string, _value: number) => void;
+  onParamChange: (_paramName: string, _value: string) => void;
   useExistingPoles: boolean;
   onUseExistingPolesChange: (_use: boolean) => void;
   poleCount: number;
@@ -104,9 +104,7 @@ export default function SolverConfiguration({
                     max={param.max}
                     step={param.type === 'integer' ? 1 : 0.01}
                     value={paramValues[param.name] ?? param.default}
-                    onChange={(e) =>
-                      onParamChange(param.name, Number(e.target.value))
-                    }
+                    onChange={(e) => onParamChange(param.name, e.target.value)}
                     className='w-full rounded-md border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-zinc-100 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30'
                   />
                   {param.description && (

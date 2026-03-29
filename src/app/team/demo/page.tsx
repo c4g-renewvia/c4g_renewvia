@@ -2363,7 +2363,7 @@ export default function DemoPage() {
               <section>
                 <button
                   onClick={() => toggleSection('markers')}
-                  className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
+                  className='mb-6 flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 transition-all hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/30'
                 >
                   <h2 className='light:text-emerald-700 text-xl font-bold text-emerald-700 dark:text-emerald-300'>
                     1. Define Markers
@@ -3264,7 +3264,7 @@ export default function DemoPage() {
               <section>
                 <button
                   onClick={() => toggleSection('savedGrids')}
-                  className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
+                  className='mb-6 flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 transition-all hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/30'
                 >
                   <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
                     Saved Mini-grids ({savedRuns.length}/10)

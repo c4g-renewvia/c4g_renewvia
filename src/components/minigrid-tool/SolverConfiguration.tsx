@@ -21,7 +21,7 @@ interface SolverConfigurationProps {
   selectedSolverName: string;
   onSolverChange: (_solverName: string) => void;
   paramValues: Record<string, number>;
-  onParamChange: (_paramName: string, _value: string) => void;
+  onParamChange: (_paramName: string, _value: number) => void;
   useExistingPoles: boolean;
   onUseExistingPolesChange: (_use: boolean) => void;
   poleCount: number;

@@ -67,10 +67,10 @@ const teamMembers = [
 
 export default function TeamPage() {
   return (
-    <div className='min-h-screen overflow-hidden bg-zinc-950 text-white'>
+    <div className='min-h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-white'>
       {/* Hero Header */}
-      <header className='relative bg-linear-to-br from-emerald-600 via-teal-700 to-cyan-700 py-24 text-center'>
-        <div className='absolute inset-0 bg-[radial-gradient(#ffffff10_1px,transparent_1px)] bg-size-[40px_40px]' />
+      <header className='relative bg-gradient-to-br from-emerald-600 via-teal-700 to-cyan-700 py-24 text-center text-white'>
+        <div className='absolute inset-0 bg-[radial-gradient(#ffffff10_1px,transparent_1px)] bg-[size:40px_40px]' />
         <div className='relative mx-auto max-w-5xl px-6'>
           <div className='mb-6 inline-flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-6 py-2 backdrop-blur-md'>
             <span className='text-2xl'>☀️</span>
@@ -115,14 +115,14 @@ export default function TeamPage() {
       <div className='mx-auto max-w-7xl px-6 py-20'>
         <div className='mb-12 flex items-end justify-between'>
           <div>
-            <div className='mb-2 text-sm font-medium tracking-[3px] text-emerald-400 uppercase'>
+            <div className='mb-2 text-sm font-medium tracking-[3px] text-emerald-600 uppercase dark:text-emerald-400'>
               MEET THE TEAM
             </div>
-            <h2 className='text-5xl font-bold tracking-tighter'>
+            <h2 className='text-5xl font-bold tracking-tighter text-zinc-900 dark:text-white'>
               The Spring 2026 Team
             </h2>
           </div>
-          <div className='hidden max-w-xs text-right text-sm text-zinc-400 md:block'>
+          <div className='hidden max-w-xs text-right text-sm text-zinc-600 md:block dark:text-zinc-400'>
             Passionate engineers, data scientists, and developers working
             together to optimize power distribution for communities across
             Africa.
@@ -133,21 +133,21 @@ export default function TeamPage() {
           {teamMembers.map((member, index) => (
             <div
               key={index}
-              className='group rounded-3xl border border-zinc-800 bg-zinc-900/70 p-8 transition-all duration-300 hover:-translate-y-2 hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-950/50'
+              className='group rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:border-emerald-500/50 hover:shadow-2xl dark:border-zinc-800 dark:bg-zinc-900/70 dark:hover:shadow-emerald-950/50'
             >
               {/* Avatar */}
               <div className='-mt-2 mb-8 flex justify-center'>
-                <div className='flex h-28 w-28 items-center justify-center rounded-2xl bg-linear-to-br from-emerald-400 to-cyan-500 text-5xl font-bold text-zinc-950 shadow-xl ring-8 shadow-emerald-900/50 ring-zinc-950 transition-all group-hover:ring-emerald-500/30'>
+                <div className='flex h-28 w-28 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 text-5xl font-bold text-zinc-950 shadow-xl ring-8 ring-white transition-all group-hover:ring-emerald-500/30 dark:ring-zinc-950'>
                   {member.initials}
                 </div>
               </div>
 
               {/* Name & Role */}
               <div className='mb-8 text-center'>
-                <h3 className='mb-1 text-3xl font-semibold tracking-tight'>
+                <h3 className='mb-1 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white'>
                   {member.name}
                 </h3>
-                <p className='text-sm font-medium tracking-wide text-emerald-400'>
+                <p className='text-sm font-medium tracking-wide text-emerald-600 dark:text-emerald-400'>
                   {member.role}
                 </p>
               </div>
@@ -156,14 +156,14 @@ export default function TeamPage() {
               <div className='space-y-10'>
                 {/* Skills */}
                 <div>
-                  <div className='mb-3 text-xs tracking-widest text-zinc-500 uppercase'>
+                  <div className='mb-3 text-xs tracking-widest text-zinc-500 uppercase dark:text-zinc-400'>
                     Skills
                   </div>
                   <div className='flex flex-wrap gap-2'>
                     {member.skills.map((skill, i) => (
                       <span
                         key={i}
-                        className='rounded-full border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs transition-colors hover:bg-emerald-900/60'
+                        className='rounded-full border border-zinc-200 bg-zinc-100 px-4 py-2 text-xs transition-colors hover:bg-emerald-100 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-emerald-900/60'
                       >
                         {skill}
                       </span>
@@ -173,24 +173,24 @@ export default function TeamPage() {
 
                 {/* Experience */}
                 <div>
-                  <div className='mb-2 text-xs tracking-widest text-zinc-500 uppercase'>
+                  <div className='mb-2 text-xs tracking-widest text-zinc-500 uppercase dark:text-zinc-400'>
                     Experience
                   </div>
-                  <p className='leading-relaxed text-zinc-300'>
+                  <p className='leading-relaxed text-zinc-700 dark:text-zinc-300'>
                     {member.experience}
                   </p>
                 </div>
               </div>
 
               {/* Decorative bottom accent */}
-              <div className='mx-auto mt-10 h-1 w-12 rounded-full bg-linear-to-br from-transparent via-emerald-400 to-transparent' />
+              <div className='mx-auto mt-10 h-1 w-12 rounded-full bg-gradient-to-br from-transparent via-emerald-500 to-transparent' />
             </div>
           ))}
         </div>
       </div>
 
       {/* Footer */}
-      <footer className='border-t border-zinc-800 py-12 text-center text-sm text-zinc-500'>
+      <footer className='border-t border-zinc-200 bg-white py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400'>
         <p>
           © 2026 • CS 6150 Computing For Good • Renewvia Project • Team Page
         </p>

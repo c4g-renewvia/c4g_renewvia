@@ -25,7 +25,7 @@ export default function MapControls({
       <button
         onClick={onUndo}
         disabled={!canUndo}
-        className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
+        className='flex items-center gap-2 rounded-full bg-amber-600 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
         title='Undo (Ctrl/Cmd + Z)'
       >
         <svg
@@ -49,7 +49,7 @@ export default function MapControls({
       <button
         onClick={onRedo}
         disabled={!canRedo}
-        className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
+        className='flex items-center gap-2 rounded-full bg-amber-600 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
         title='Redo (Ctrl/Cmd + Shift + Z)'
       >
         <svg
@@ -73,7 +73,7 @@ export default function MapControls({
       <button
         onClick={onReset}
         disabled={!hasData}
-        className='flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl transition-all hover:bg-red-600 active:scale-95 disabled:opacity-50 dark:text-white'
+        className='flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-red-500 active:scale-95 disabled:opacity-50 dark:text-white'
         title='Reset everything'
       >
         <svg

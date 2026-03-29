@@ -2213,9 +2213,8 @@ export default function DemoPage() {
   // (handleAddManualPoint, handleDragOver, handleDrop, handleResetMap, generateRandomCosts, etc.)
 
   // ==================== RENDER ====================
-  // ==================== RENDER ====================
   return (
-    <div className='fixed inset-0 z-50 overflow-hidden bg-zinc-950 text-zinc-900 dark:text-white'>
+    <div className='fixed inset-0 z-50 overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-white'>
       {/* MAIN SITE HEADER - Overlay on top of map */}
       <Header />
 
@@ -2259,11 +2258,14 @@ export default function DemoPage() {
       {/* MAIN CONTAINER - Full Screen Map */}
       <div className='relative h-full overflow-hidden pt-16'>
         {/* FULL-BLEED MAP - Now fills the entire screen */}
-        <div ref={mapRef} className='absolute inset-0 bg-zinc-950' />
+        <div
+          ref={mapRef}
+          className='absolute inset-0 bg-zinc-50 dark:bg-zinc-950'
+        />
 
         {/* Sidebar Drawer */}
         <div
-          className={`fixed top-16 left-0 z-40 h-[calc(100vh-4rem)] max-w-full border-r bg-white text-zinc-900 shadow-2xl transition-transform duration-300 ease-in-out dark:bg-zinc-950 dark:text-white ${
+          className={`fixed top-16 left-0 z-40 h-[calc(100vh-4rem)] max-w-full border-r border-zinc-200 bg-white text-zinc-900 shadow-2xl transition-transform duration-300 ease-in-out dark:border-zinc-700 dark:bg-zinc-950 dark:text-white ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           style={{ width: `${sidebarWidth}px` }}
@@ -2283,7 +2285,7 @@ export default function DemoPage() {
                   onClick={() => toggleSection('markers')}
                   className='mb-6 flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 transition-all hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/30'
                 >
-                  <h2 className='light:text-emerald-700 text-xl font-bold text-emerald-700 dark:text-emerald-300'>
+                  <h2 className='text-xl font-bold text-emerald-700 dark:text-emerald-300'>
                     1. Define Markers
                   </h2>
                   <svg
@@ -2304,7 +2306,7 @@ export default function DemoPage() {
                 {expandedSections.markers && (
                   <div className='space-y-4'>
                     {/* Click to Set Marker*/}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
+                    <div className='rounded-xl border border-zinc-200 bg-white p-6 backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/50'>
                       <ul className='space-y-3 text-sm'>
                         <li className='flex items-start gap-3'>
                           <span className='mt-1 text-emerald-500'>•</span>
@@ -2322,13 +2324,6 @@ export default function DemoPage() {
                             <strong>30 meters</strong>.
                           </span>
                         </li>
-                        {/*<li className='flex items-start gap-3'>*/}
-                        {/*  <span className='mt-1 text-emerald-500'>•</span>*/}
-                        {/*  <span>*/}
-                        {/*    <strong>Use the Draw Edge</strong> feature to draw*/}
-                        {/*    an edge between markers.*/}
-                        {/*  </span>*/}
-                        {/*</li>*/}
                         <li className='flex items-start gap-3'>
                           <span className='mt-1 text-emerald-500'>•</span>
                           <span>
@@ -2461,13 +2456,13 @@ export default function DemoPage() {
               <section>
                 <button
                   onClick={() => toggleSection('export')}
-                  className='mb-6 flex w-full items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-900/20 px-5 py-4 transition-all hover:bg-blue-900/30'
+                  className='mb-6 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 transition-all hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-900/20 dark:hover:bg-blue-900/30'
                 >
                   <h2 className='text-xl font-bold text-blue-700 dark:text-blue-300'>
                     3. Export & Summary
                   </h2>
                   <svg
-                    className={`h-5 w-5 text-blue-400 transition-transform ${
+                    className={`h-5 w-5 text-blue-600 transition-transform dark:text-blue-400 ${
                       expandedSections.export ? 'rotate-180' : ''
                     }`}
                     fill='none'
@@ -2514,7 +2509,7 @@ export default function DemoPage() {
               />
             </div>
             <br />
-            <hr />
+            <hr className='border-zinc-200 dark:border-zinc-700' />
             <br />
             <p className='text-center text-xs text-zinc-500 dark:text-zinc-400'>
               <a href={'https://forms.gle/Az6j5cjtzJJDEQAEA'} target='_blank'>
@@ -2551,7 +2546,7 @@ export default function DemoPage() {
         />
 
         {/* FOOTER - Minimal */}
-        <footer className='border-t border-zinc-800 bg-zinc-950 py-4 text-center text-xs text-zinc-600'>
+        <footer className='border-t border-zinc-200 bg-white py-4 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400'>
           © 2026 • CS 6150 Computing For Good • Renewvia Project Demo
         </footer>
 

@@ -1,14 +1,13 @@
-// components/minigrid/AddPointDialog.tsx
 'use client';
 
 import React from 'react';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/components/ui/dialog';
 
 interface AddPointDialogProps {
@@ -31,16 +30,20 @@ export default function AddPointDialog({
 }: AddPointDialogProps) {
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className='border-zinc-800 bg-zinc-900 text-white sm:max-w-106.25'>
+      <DialogContent className='border-zinc-200 bg-white text-zinc-900 sm:max-w-106.25 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white'>
         <DialogHeader>
-          <DialogTitle>Add New Point</DialogTitle>
-          <DialogDescription className='text-zinc-400'>
+          <DialogTitle className='text-zinc-900 dark:text-white'>
+            Add New Point
+          </DialogTitle>
+          <DialogDescription className='text-zinc-500 dark:text-zinc-400'>
             Set the details for the location you just clicked.
           </DialogDescription>
         </DialogHeader>
         <div className='grid gap-4 py-4'>
           <div className='grid grid-cols-4 items-center gap-4'>
-            <label className='text-right text-sm'>Name</label>
+            <label className='text-right text-sm text-zinc-700 dark:text-zinc-300'>
+              Name
+            </label>
             <input
               value={newPointDetails.name}
               onChange={(e) =>
@@ -49,11 +52,13 @@ export default function AddPointDialog({
                   name: e.target.value,
                 })
               }
-              className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
+              className='col-span-3 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-emerald-500 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-emerald-500'
             />
           </div>
           <div className='grid grid-cols-4 items-center gap-4'>
-            <label className='text-right text-sm'>Type</label>
+            <label className='text-right text-sm text-zinc-700 dark:text-zinc-300'>
+              Type
+            </label>
             <select
               value={newPointDetails.type}
               onChange={(e) =>
@@ -62,7 +67,7 @@ export default function AddPointDialog({
                   type: e.target.value as 'source' | 'terminal' | 'pole',
                 })
               }
-              className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
+              className='col-span-3 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-emerald-500 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-emerald-500'
             >
               <option value='terminal'>Terminal</option>
               <option value='source'>Source</option>
@@ -73,13 +78,13 @@ export default function AddPointDialog({
         <DialogFooter>
           <button
             onClick={() => onOpenChange(false)}
-            className='px-4 py-2 text-sm text-zinc-400 hover:text-white'
+            className='px-4 py-2 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white'
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className='rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-700'
+            className='rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 active:bg-emerald-700'
           >
             Add Point
           </button>

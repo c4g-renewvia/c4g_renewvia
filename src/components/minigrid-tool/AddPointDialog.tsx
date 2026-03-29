@@ -14,7 +14,6 @@ import {
 interface AddPointDialogProps {
   isOpen: boolean;
   onOpenChange: (_open: boolean) => void;
-  pendingPoint: { lat: number; lng: number } | null;
   newPointDetails: { name: string; type: 'source' | 'terminal' | 'pole' };
   onNewPointDetailsChange: (_details: {
     name: string;

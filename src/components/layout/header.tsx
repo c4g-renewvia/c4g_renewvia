@@ -26,9 +26,6 @@ export function Header() {
               width={32}
               height={32}
             />
-            <span className='hidden text-lg font-semibold sm:block'>
-              MiniGrid Demo
-            </span>
           </Link>
         </div>
 

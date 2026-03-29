@@ -54,6 +54,14 @@ export default function Home() {
             See the Demo
           </a>
         </div>
+        <div className='mt-10 flex flex-col items-center gap-3 sm:flex-row'>
+          <a
+            href='/tool'
+            className='inline-flex items-center justify-center rounded-xl bg-emerald-500 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition-all hover:bg-emerald-400 hover:shadow-xl hover:shadow-emerald-500/40 focus:ring-2 focus:ring-emerald-400/50 focus:outline-none active:scale-[0.985]'
+          >
+            Use the Tool
+          </a>
+        </div>
 
         {/* Bottom card */}
         <div className='mt-12 w-full max-w-3xl rounded-2xl border border-white/10 bg-white/5 p-6 text-left text-white/80 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur'>

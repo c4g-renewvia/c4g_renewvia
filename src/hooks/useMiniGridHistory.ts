@@ -5,7 +5,7 @@ import {
   MarkerPoint,
   MiniGridNode,
   MiniGridEdge,
-} from '@/app/tool/page';
+} from '@/app/minigrid-tool/page';
 
 interface HistoryState {
   dataPoints: MarkerPoint[];

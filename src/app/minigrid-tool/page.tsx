@@ -1,29 +1,37 @@
 'use client';
 
 import React, {
+  ChangeEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
-  ChangeEvent,
-  useCallback,
 } from 'react';
 import Script from 'next/script';
 import Papa from 'papaparse';
-import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogClose,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Header } from '@/components/layout/header';
-
 import { useSession } from 'next-auth/react';
 
+import { Header } from '@/components/layout/header';
 import { useMiniGridHistory } from '@/hooks/useMiniGridHistory';
+
+import AddPointDialog from '@/components/minigrid-tool/AddPointDialog';
+import TestDataGenerator from '@/components/minigrid-tool/TestDataGenerator';
+import FileUploadArea from '@/components/minigrid-tool/FileUploadArea';
+import CostParameters from '@/components/minigrid-tool/CostParameters';
+import SolverConfiguration from '@/components/minigrid-tool/SolverConfiguration';
+import ManualPointInput from '@/components/minigrid-tool/ManualPointInput';
+import ExportSummary from '@/components/minigrid-tool/ExportSummary';
+import SavedGridsSection from '@/components/minigrid-tool/SavedGridsSection';
+import MapControls from '@/components/minigrid-tool/MapControls';
+
+import type {
+  MarkerPoint,
+  MiniGridEdge,
+  MiniGridNode,
+  CostBreakdown,
+  MiniGridRun,
+  Solvers,
+} from '@/types/minigrid';
 
 const GOOGLE_MAPS_API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
@@ -60,81 +68,9 @@ const haversineDistance = (
 
 const formatMeters = (m: number) =>
   m.toLocaleString(undefined, { maximumFractionDigits: 0 });
-const formatUSD = (v: number) =>
-  v.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 
 const highVoltageColor = '#8B5CF6';
 const lowVoltageColor = '#3B82F6';
-
-// ==================== INTERFACES ====================
-export interface MarkerPoint {
-  name: string;
-  type: 'source' | 'terminal' | 'pole';
-  lat: number;
-  lng: number;
-}
-
-export interface MiniGridEdge {
-  start: { lat: number; lng: number };
-  end: { lat: number; lng: number };
-  lengthMeters: number;
-  voltage: 'low' | 'high';
-}
-
-export interface MiniGridNode {
-  index: number;
-  lat: number;
-  lng: number;
-  name: string;
-  type: 'source' | 'terminal' | 'pole';
-}
-
-export interface CostBreakdown {
-  lowVoltageMeters: number;
-  highVoltageMeters: number;
-  totalMeters: number;
-  lowWireCost: number;
-  highWireCost: number;
-  wireCost: number;
-  poleCount: number;
-  poleCost: number;
-  pointCount: number;
-  grandTotal: number;
-  usedPoleCost?: number;
-  usedLowCostPerMeter?: number;
-  usedHighCostPerMeter?: number;
-}
-
-interface MiniGridRun {
-  id: string;
-  name?: string;
-  createdAt: string;
-  fileName?: string | null;
-  dataPoints: MarkerPoint[];
-  miniGridNodes: MiniGridNode[];
-  miniGridEdges: MiniGridEdge[];
-  costBreakdown: CostBreakdown;
-  poleCost: number;
-  lowVoltageCost: number;
-  highVoltageCost: number;
-}
-
-interface Solvers {
-  name: string;
-  params: SolverParam[];
-}
-
-interface SolverParam {
-  name: string;
-  type?: 'integer' | 'float' | 'number';
-  default: number;
-  min?: number;
-  max?: number;
-  description: string;
-}
 
 // ==================== MAIN COMPONENT ====================
 export default function DemoPage() {
@@ -178,8 +114,6 @@ export default function DemoPage() {
   const hasPoles = poleCount > 0;
 
   const [solverOriginalCost, setSolverOriginalCost] = useState<number>(0);
-  const costDiff = costBreakdown.grandTotal - solverOriginalCost;
-  const isNegative = costDiff <= 0;
 
   const [selectedCount, setSelectedCount] = useState<number>(10);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -220,7 +154,6 @@ export default function DemoPage() {
   const [paramValues, setParamValues] = useState<Record<string, number>>({});
   const [useExistingPoles, setUseExistingPoles] = useState(false);
 
-  const [calculationResult] = useState<string>('');
   const [calcError, setCalcError] = useState<string | null>(null);
 
   const [manualPoint, setManualPoint] = useState({
@@ -1559,6 +1492,23 @@ export default function DemoPage() {
     }
   };
 
+  const handleGenerateTestData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Use selectedCount from state instead of a parameter
+      await generateTestData(selectedCount);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to generate test data';
+      setError(msg);
+      console.error('Test data generation failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const generateTestData = (count: number) => {
     // First, clear old derived state (but do NOT save yet)
     setMiniGridEdges([]);
@@ -1657,38 +1607,6 @@ export default function DemoPage() {
 
     // Save the CORRECT new state
     saveState(newState);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-
-    const files = e.dataTransfer.files;
-    if (files.length === 0) return;
-
-    const file = files[0];
-    const name = file.name.toLowerCase();
-
-    if (
-      file.type === 'text/csv' ||
-      name.endsWith('.csv') ||
-      name.endsWith('.kml') ||
-      file.type === 'application/vnd.google-earth.kml+xml'
-    ) {
-      processFile(file);
-    } else {
-      setError('Please drop a CSV or KML file.');
-    }
   };
 
   const handleResetMap = () => {
@@ -2420,351 +2338,66 @@ export default function DemoPage() {
                       </ul>
                     </div>
 
-                    {/* Generate Test Data Card */}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Generate Test Data
-                      </h3>
-                      <p className='mb-4 text-sm leading-snug text-zinc-400'>
-                        Random points in ~1 mi² area – good for quick testing
-                      </p>
+                    {/* Inside the expanded markers section */}
+                    <TestDataGenerator
+                      selectedCount={selectedCount}
+                      onCountChange={setSelectedCount}
+                      onGenerate={handleGenerateTestData}
+                      loading={loading}
+                      error={error}
+                    />
 
-                      <div className='flex flex-wrap items-center gap-4'>
-                        <select
-                          value={selectedCount}
-                          onChange={(e) =>
-                            setSelectedCount(Number(e.target.value))
-                          }
-                          className='min-w-35 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                          disabled={loading}
-                        >
-                          {Array.from({ length: 91 }, (_, i) => i + 10).map(
-                            (n) => (
-                              <option key={n} value={n}>
-                                {n} points
-                              </option>
-                            )
-                          )}
-                        </select>
+                    {/* File Upload Area - Now using the component */}
+                    <FileUploadArea
+                      isDragOver={isDragOver}
+                      fileName={fileName}
+                      dataPointsLength={dataPoints.length}
+                      loading={loading}
+                      error={error}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
 
-                        <button
-                          onClick={async () => {
-                            if (loading) return;
-                            setLoading(true);
-                            setDataPoints([]); // ← immediate visual clear
-                            setMiniGridNodes([]);
-                            setMiniGridEdges([]);
-                            setError(null); // clear previous errors
+                        const files = e.dataTransfer.files;
+                        if (files.length === 0) return;
 
-                            try {
-                              await generateTestData(selectedCount); // ← make sure this is async if it does any async work
-                              console.log(
-                                `Generated ${selectedCount} test points successfully`
-                              );
-                            } catch (err) {
-                              const msg =
-                                err instanceof Error
-                                  ? err.message
-                                  : 'Failed to generate test data';
-                              setError(msg);
-                              console.error(
-                                'Test data generation failed:',
-                                err
-                              );
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                          disabled={loading}
-                          className={`rounded-lg px-6 py-2.5 text-sm font-medium text-zinc-900 transition-all dark:text-white ${
-                            loading
-                              ? 'cursor-wait bg-blue-700/60'
-                              : 'bg-blue-600 shadow-sm hover:bg-blue-700 active:scale-97'
-                          } `}
-                        >
-                          {loading ? (
-                            <span className='flex items-center gap-2'>
-                              <svg
-                                className='h-4 w-4 animate-spin'
-                                viewBox='0 0 24 24'
-                              >
-                                <circle
-                                  className='opacity-25'
-                                  cx='12'
-                                  cy='12'
-                                  r='10'
-                                  stroke='currentColor'
-                                  strokeWidth='4'
-                                  fill='none'
-                                />
-                                <path
-                                  className='opacity-75'
-                                  fill='currentColor'
-                                  d='M4 12a8 8 0 018-8v8h8a8 8 0 01-16 0z'
-                                />
-                              </svg>
-                              Generating…
-                            </span>
-                          ) : (
-                            'Generate'
-                          )}
-                        </button>
-                      </div>
-                      {/* Error display (if any) */}
-                      {error && (
-                        <p className='mt-3 text-center text-sm text-red-400'>
-                          {error}
-                        </p>
-                      )}
-                    </div>
+                        const file = files[0];
+                        const name = file.name.toLowerCase();
 
-                    {/* Upload File*/}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Upload File
-                      </h3>
-                      <div className='mb-4 space-y-1.5 text-xs text-zinc-500'>
-                        <p>
-                          CSV example:{' '}
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
-                                Example
-                              </button>
-                            </DialogTrigger>
-                            <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
-                              <DialogHeader>
-                                <DialogTitle>CSV Sample Format</DialogTitle>
-                              </DialogHeader>
-                              <DialogDescription>
-                                <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
-                                  {`Name,Type,Latitude,Longitude
-"Georgia Tech",source,33.77728650,-84.39617097
-"Student Center",terminal,33.77680000,-84.39750000
-"Library",terminal,33.77420000,-84.39890000
-"Dorm A",terminal,33.77850000,-84.39510000
-"Cafeteria",terminal,33.77790000,-84.39920000`}
-                                </pre>
-                                <p className='mt-3 text-xs text-zinc-400'>
-                                  • Header row required
-                                  <br />
-                                  • Type: source or terminal
-                                  <br />• ≥6 decimal places recommended
-                                </p>
-                              </DialogDescription>
-                              <DialogFooter>
-                                <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
-                                  Close
-                                </DialogClose>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>{' '}
-                          | KML example:{' '}
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <button className='text-xs text-emerald-400 underline hover:text-emerald-700 dark:text-emerald-300'>
-                                Example
-                              </button>
-                            </DialogTrigger>
-                            <DialogContent className='sm:max-w-lg md:max-w-xl lg:max-w-2xl'>
-                              {/* your existing KML content here – same as before */}
-                              <DialogHeader>
-                                <DialogTitle>KML Sample Format</DialogTitle>
-                              </DialogHeader>
-                              <DialogDescription>
-                                <pre className='mt-2 overflow-x-auto rounded bg-zinc-900 p-3 font-mono text-xs whitespace-pre-wrap'>
-                                  {`<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <Placemark>
-      <name>Georgia Tech</name>
-      <description>Type: source</description>
-      <Point>
-        <coordinates>-84.39617097,33.77728650,0</coordinates>
-      </Point>
-    </Placemark>
-    <Placemark>
-      <name>Student Center</name>
-      <description>Type: terminal</description>
-      <Point>
-        <coordinates>-84.39750000,33.77680000,0</coordinates>
-      </Point>
-    </Placemark>
-  </Document>
-</kml>`}
-                                </pre>
-                              </DialogDescription>
-                              <DialogFooter>
-                                <DialogClose className='rounded bg-emerald-600 px-3 py-1.5 text-xs hover:bg-emerald-700'>
-                                  Close
-                                </DialogClose>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
-                        </p>
-                      </div>
+                        if (
+                          file.type === 'text/csv' ||
+                          name.endsWith('.csv') ||
+                          name.endsWith('.kml') ||
+                          file.type === 'application/vnd.google-earth.kml+xml'
+                        ) {
+                          processFile(file);
+                          setExpandedSections({
+                            markers: false,
+                            solver_cost: true,
+                            export: false,
+                            savedGrids: false,
+                          });
+                        } else {
+                          setError('Please drop a CSV or KML file.');
+                        }
+                      }}
+                      onFileSelect={handleFileUpload}
+                    />
 
-                      {/* ── Smaller drag & drop area ── */}
-                      <div
-                        className={`relative rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
-                          isDragOver
-                            ? 'border-emerald-400 bg-emerald-900/25'
-                            : 'border-zinc-700 hover:border-zinc-600'
-                        }`}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
-                      >
-                        <div className='flex flex-wrap items-center justify-center gap-4'>
-                          {/* Icon left */}
-                          <div className='shrink-0 text-3xl opacity-90'>📄</div>
-
-                          {/* Text + button right */}
-                          <div className='flex flex-col items-center gap-2'>
-                            <p className='text-base font-medium text-zinc-200'>
-                              {isDragOver
-                                ? 'Drop file here'
-                                : 'Drag & drop or click'}
-                            </p>
-
-                            <label className='inline-flex cursor-pointer items-center rounded bg-emerald-600 px-5 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-emerald-700 active:scale-97 dark:text-white'>
-                              Select File
-                              <input
-                                type='file'
-                                accept='.csv,.kml'
-                                onChange={handleFileUpload}
-                                className='hidden'
-                              />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Status messages */}
-                      <div className='mt-3 text-center text-sm'>
-                        <div className='flex flex-wrap items-center justify-center gap-x-6 gap-y-1.5'>
-                          {/* Selected file */}
-                          {fileName && (
-                            <p className='truncate font-medium text-zinc-600 dark:text-zinc-300'>
-                              Selected:{' '}
-                              <span className='text-zinc-400'>{fileName}</span>
-                            </p>
-                          )}
-
-                          {/* Loaded count – shown only when successful */}
-                          {dataPoints.length > 0 && !loading && (
-                            <p className='font-medium text-emerald-700 dark:text-emerald-300'>
-                              Loaded {dataPoints.length} point
-                              {dataPoints.length !== 1 ? 's' : ''}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Error or Loading – full width below if present */}
-                        {error && (
-                          <p className='mt-1.5 text-red-400'>{error}</p>
-                        )}
-
-                        {loading && (
-                          <p className='mt-1.5 animate-pulse text-emerald-400'>
-                            Processing…
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Manual Point Card */}
-                    <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='mb-3 text-lg font-semibold text-zinc-100'>
-                        Input Coordinates Manually
-                      </h3>
-                      <form
-                        onSubmit={handleAddCoordinatesManually}
-                        className='space-y-4'
-                      >
-                        <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-                          <div>
-                            <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
-                              Name
-                            </label>
-                            <input
-                              type='text'
-                              placeholder='e.g. House A'
-                              value={manualPoint.name}
-                              onChange={(e) =>
-                                setManualPoint({
-                                  ...manualPoint,
-                                  name: e.target.value,
-                                })
-                              }
-                              className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-emerald-500 dark:text-white'
-                            />
-                          </div>
-                          <div>
-                            <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
-                              Latitude
-                            </label>
-                            <input
-                              type='text'
-                              placeholder='33.777...'
-                              value={manualPoint.lat}
-                              onChange={(e) =>
-                                setManualPoint({
-                                  ...manualPoint,
-                                  lat: e.target.value,
-                                })
-                              }
-                              className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-emerald-500 dark:text-white'
-                            />
-                          </div>
-                          <div>
-                            <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
-                              Longitude
-                            </label>
-                            <input
-                              type='text'
-                              placeholder='-84.396...'
-                              value={manualPoint.lng}
-                              onChange={(e) =>
-                                setManualPoint({
-                                  ...manualPoint,
-                                  lng: e.target.value,
-                                })
-                              }
-                              className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-emerald-500 dark:text-white'
-                            />
-                          </div>
-                          <div>
-                            <label className='mb-1.5 block text-xs font-medium text-zinc-400'>
-                              Type
-                            </label>
-                            <select
-                              value={manualPoint.type}
-                              onChange={(e) =>
-                                setManualPoint({
-                                  ...manualPoint,
-                                  type: e.target.value as
-                                    | 'source'
-                                    | 'terminal'
-                                    | 'pole',
-                                })
-                              }
-                              className='w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-emerald-500 dark:text-white'
-                            >
-                              <option value='terminal'>Terminal</option>
-                              <option value='source'>Source</option>
-                              <option value='source'>Pole</option>
-                            </select>
-                          </div>
-                        </div>
-                        <button
-                          type='submit'
-                          className='w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-emerald-700 active:scale-95 dark:text-white'
-                        >
-                          Add Marker to Map
-                        </button>
-                      </form>
-                    </div>
+                    {/* Manual Point Input - NEW */}
+                    <ManualPointInput
+                      manualPoint={manualPoint}
+                      onManualPointChange={setManualPoint}
+                      onAddPoint={handleAddCoordinatesManually}
+                    />
                   </div>
                 )}
               </section>
@@ -2795,213 +2428,31 @@ export default function DemoPage() {
 
                 {expandedSections.solver_cost && (
                   <div className='space-y-4'>
-                    <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
-                        Cost Parameters
-                      </h3>
-                      <div className='grid gap-6 sm:grid-cols-3'>
-                        <div>
-                          <label className='light:text-zinc-100 mb-2 block text-sm font-medium dark:text-zinc-300'>
-                            Pole ($)
-                          </label>
-                          <input
-                            type='number'
-                            step='0.01'
-                            min='0'
-                            value={poleCost}
-                            onChange={(e) =>
-                              setPoleCost(parseFloat(e.target.value))
-                            }
-                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                          />
-                        </div>
-                        <div>
-                          <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
-                            Low Volt. ($/m)
-                          </label>
-                          <input
-                            type='number'
-                            step='0.01'
-                            min='0'
-                            value={lowVoltageCost}
-                            onChange={(e) =>
-                              setLowVoltageCost(parseFloat(e.target.value))
-                            }
-                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                          />
-                        </div>
-                        <div>
-                          <label className='mb-2 block text-sm font-medium text-zinc-600 dark:text-zinc-300'>
-                            High Volt. ($/m)
-                          </label>
-                          <input
-                            type='number'
-                            step='0.01'
-                            min='0'
-                            value={highVoltageCost}
-                            onChange={(e) =>
-                              setHighVoltageCost(parseFloat(e.target.value))
-                            }
-                            disabled
-                            className='light:bg-zinc-100 w-full rounded-lg border border-zinc-700 px-4 py-2.5 text-sm focus:border-emerald-500 dark:bg-zinc-800'
-                          />
-                        </div>
-                      </div>
-                      <button
-                        onClick={generateRandomCosts}
-                        className='mt-5 text-sm text-emerald-400 hover:underline'
-                      >
-                        Use realistic random values
-                      </button>
-                    </div>
+                    <CostParameters
+                      poleCost={poleCost}
+                      lowVoltageCost={lowVoltageCost}
+                      highVoltageCost={highVoltageCost}
+                      onPoleCostChange={setPoleCost}
+                      onLowVoltageCostChange={setLowVoltageCost}
+                      onHighVoltageCostChange={setHighVoltageCost}
+                      onRandomCosts={generateRandomCosts}
+                    />
 
-                    {/* Solver Selection + Parameters + Run */}
-                    <div className='flex flex-col rounded-xl border border-zinc-700/70 bg-white p-7 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <h3 className='light:text-zinc-300 mb-5 text-xl font-semibold dark:text-zinc-100'>
-                        Solver Configuration
-                      </h3>
-
-                      {/* Solver Select */}
-                      <div className='relative mb-6'>
-                        <label
-                          htmlFor='solver-select'
-                          className='light:text-zinc-600 mb-2 block text-sm font-medium dark:text-zinc-300'
-                        >
-                          Select Solver
-                        </label>
-                        <select
-                          id='solver-select'
-                          value={selectedSolverName}
-                          onChange={(e) =>
-                            setSelectedSolverName(e.target.value)
-                          }
-                          className='light:bg-zinc-600/70dark:bg-zinc-800/70 light:text-zinc-400 w-full appearance-none rounded-lg border border-zinc-700/70 px-4 py-3 pr-10 text-base font-medium focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/40 dark:text-zinc-100'
-                        >
-                          <option value='' disabled>
-                            Choose a solver...
-                          </option>
-                          {solvers.map((s) => (
-                            <option key={s.name} value={s.name}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                        <div className='pointer-events-none absolute inset-y-13 right-0 flex items-center pr-4'>
-                          <svg
-                            className='h-5 w-5 text-zinc-400 dark:text-zinc-500'
-                            fill='none'
-                            stroke='currentColor'
-                            viewBox='0 0 24 24'
-                          >
-                            <path
-                              strokeLinecap='round'
-                              strokeLinejoin='round'
-                              strokeWidth={2}
-                              d='M19 9l-7 7-7-7'
-                            />
-                          </svg>
-                        </div>
-                      </div>
-
-                      {/* Dynamic Solver Parameters */}
-                      {selectedSolver && selectedSolver.params?.length > 0 && (
-                        <div className='mb-6 space-y-5 rounded-lg border border-zinc-700/50 bg-zinc-900/40 p-5'>
-                          <h4 className='text-lg font-medium text-zinc-200'>
-                            {selectedSolver.name} Parameters
-                          </h4>
-                          <div className='grid gap-5 sm:grid-cols-2'>
-                            {selectedSolver.params.map((param) => (
-                              <div key={param.name} className='space-y-1.5'>
-                                <label
-                                  htmlFor={`param-${param.name}`}
-                                  className='block text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                                >
-                                  {param.name}
-                                  <span className='ml-2 text-xs text-zinc-500'>
-                                    (default: {param.default})
-                                  </span>
-                                </label>
-                                <input
-                                  id={`param-${param.name}`}
-                                  type='number'
-                                  min={param.min}
-                                  max={param.max}
-                                  step={param.type === 'integer' ? 1 : 0.01}
-                                  value={paramValues[param.name] ?? ''}
-                                  onChange={(e) =>
-                                    updateParam(param.name, e.target.value)
-                                  }
-                                  className='w-full rounded-md border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-zinc-100 focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30'
-                                />
-                                {param.description && (
-                                  <p className='text-xs text-zinc-500'>
-                                    {param.description}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {hasPoles && (
-                        <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
-                          <input
-                            type='checkbox'
-                            id='use-poles'
-                            checked={useExistingPoles}
-                            onChange={(e) =>
-                              setUseExistingPoles(e.target.checked)
-                            }
-                            className='light:bg-zinc-300 h-5 w-5 rounded border-zinc-600 text-purple-600 focus:ring-purple-500 dark:bg-zinc-800'
-                          />
-                          <label
-                            htmlFor='use-poles'
-                            className='light:text-zinc-600 cursor-pointer text-sm font-medium dark:text-zinc-300'
-                          >
-                            Use existing poles in calculation ({poleCount} poles
-                            detected)
-                          </label>
-                        </div>
-                      )}
-
-                      {/* Run Button */}
-                      <div className='mt-auto pt-4'>
-                        <button
-                          onClick={handleRunSolver}
-                          disabled={
-                            computingMiniGrid ||
-                            dataPoints.length < 2 ||
-                            !selectedSolverName
-                          }
-                          className='w-full rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 px-8 py-5 text-lg font-bold shadow-xl shadow-purple-900/40 transition-all hover:scale-[1.02] hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50'
-                        >
-                          {computingMiniGrid ? 'Solving...' : 'Run Solver'}
-                        </button>
-
-                        <p className='mt-4 text-xs text-zinc-500'>
-                          Beta • Low Voltage Only • Limited to Single Power
-                          Source
-                        </p>
-                      </div>
-
-                      {calcError && (
-                        <p className='mt-4 text-center text-sm font-medium text-red-400'>
-                          {calcError}
-                        </p>
-                      )}
-
-                      {calculationResult && (
-                        <div className='mt-6 w-full rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-left'>
-                          <h4 className='mb-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300'>
-                            Python result:
-                          </h4>
-                          <pre className='overflow-x-auto text-xs text-emerald-200/90'>
-                            {calculationResult}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
+                    <SolverConfiguration
+                      solvers={solvers}
+                      selectedSolverName={selectedSolverName}
+                      onSolverChange={setSelectedSolverName}
+                      paramValues={paramValues}
+                      onParamChange={updateParam} // your existing updateParam function
+                      useExistingPoles={useExistingPoles}
+                      onUseExistingPolesChange={setUseExistingPoles}
+                      poleCount={
+                        miniGridNodes.filter((n) => n.type === 'pole').length
+                      }
+                      onRunSolver={handleRunSolver}
+                      computing={computingMiniGrid}
+                      calcError={calcError}
+                    />
                   </div>
                 )}
               </section>
@@ -3033,331 +2484,34 @@ export default function DemoPage() {
                 </button>
 
                 {expandedSections.export && (
-                  <div className='space-y-4'>
-                    {miniGridNodes.length > 0 && (
-                      <div className='light:bg-zinc-400/40 light:border-zinc-700/50 mt-4 flex items-center gap-3 rounded-lg border p-4 dark:border-zinc-700/50 dark:bg-zinc-900/40'>
-                        <input
-                          type='checkbox'
-                          id='allow-drag-terminals'
-                          checked={allowDragTerminals}
-                          onChange={(e) =>
-                            setAllowDragTerminals(e.target.checked)
-                          }
-                          className='h-5 w-5 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-purple-500'
-                        />
-                        <label
-                          htmlFor='allow-drag-terminals'
-                          className='cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-300'
-                        >
-                          Allow dragging of{' '}
-                          <span className='font-semibold text-blue-400'>
-                            Terminals
-                          </span>{' '}
-                          (Poles can always be dragged)
-                        </label>
-                      </div>
-                    )}
-
-                    {/* Solver Cost Box */}
-                    {solverOriginalCost > 0 && (
-                      <div className='rounded-2xl border border-purple-500/30 bg-purple-900/20 p-6 text-center'>
-                        <p className='text-xs font-bold tracking-widest text-purple-400 uppercase'>
-                          Solver Cost
-                        </p>
-                        <p className='mt-1 text-4xl font-extrabold text-purple-300'>
-                          ${formatUSD(solverOriginalCost)}
-                        </p>
-                        <div className='mt-4 grid grid-cols-2 gap-x-4 border-t border-purple-500/20 pt-4 text-left text-[10px] text-purple-300/70'>
-                          {/* Column 1: Poles */}
-                          <div className='space-y-1'>
-                            <p className='text-xs font-semibold text-purple-400'>
-                              Poles
-                            </p>
-                            <p>
-                              {costBreakdown.poleCount} @ $
-                              {formatUSD(
-                                costBreakdown.usedPoleCost || poleCost
-                              )}
-                            </p>
-                            <p className='pt-1 font-medium text-purple-200'>
-                              Total: ${formatUSD(costBreakdown.poleCost)}
-                            </p>
-                          </div>
-                          {/* Column 2: Wires (Separated) */}
-                          <div className='space-y-3 border-l border-purple-500/10 pl-4'>
-                            <div className='space-y-0.5'>
-                              <p className='text-xs font-semibold text-purple-400'>
-                                LV Wire
-                              </p>
-                              <p>
-                                {formatMeters(costBreakdown.lowVoltageMeters)}m
-                                @ $
-                                {formatUSD(
-                                  costBreakdown.usedLowCostPerMeter ||
-                                    lowVoltageCost
-                                )}
-                                /m
-                              </p>
-                              <p className='font-medium text-purple-200'>
-                                Total: ${formatUSD(costBreakdown.lowWireCost)}
-                              </p>
-                            </div>
-                            <div className='space-y-0.5'>
-                              <p className='text-xs font-semibold text-purple-400'>
-                                HV Wire
-                              </p>
-                              <p>
-                                {formatMeters(costBreakdown.highVoltageMeters)}m
-                                @ $
-                                {formatUSD(
-                                  costBreakdown.usedHighCostPerMeter ||
-                                    highVoltageCost
-                                )}
-                                /m
-                              </p>
-                              <p className='font-medium text-purple-200'>
-                                Total: ${formatUSD(costBreakdown.highWireCost)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Live Cost Box */}
-                    {costBreakdown.grandTotal > 0 && (
-                      <div className='rounded-2xl border border-emerald-500/30 bg-emerald-900/20 p-6 text-center'>
-                        <p className='text-xs font-bold tracking-widest text-emerald-400 uppercase'>
-                          Live Cost
-                        </p>
-                        <p className='mt-1 text-4xl font-extrabold text-emerald-700 dark:text-emerald-300'>
-                          ${formatUSD(costBreakdown.grandTotal)}
-                        </p>
-                        <div className='mt-4 grid grid-cols-2 gap-x-4 border-t border-emerald-500/20 pt-4 text-left text-[10px] text-emerald-400/70'>
-                          {/* Column 1: Poles */}
-                          <div className='space-y-1'>
-                            <p className='text-xs font-semibold text-emerald-500'>
-                              Poles
-                            </p>
-                            <p>
-                              {
-                                miniGridNodes.filter((n) => n.type === 'pole')
-                                  .length
-                              }{' '}
-                              @ ${formatUSD(poleCost)}
-                            </p>
-                            <p className='pt-1 font-medium text-emerald-200'>
-                              Total: $
-                              {formatUSD(
-                                miniGridNodes.filter((n) => n.type === 'pole')
-                                  .length * poleCost
-                              )}
-                            </p>
-                          </div>
-                          {/* Column 2: Wires (Separated) */}
-                          <div className='space-y-3 border-l border-emerald-500/10 pl-4'>
-                            <div className='space-y-0.5'>
-                              <p className='text-xs font-semibold text-emerald-500'>
-                                LV Wire
-                              </p>
-                              <p>
-                                {formatMeters(costBreakdown.lowVoltageMeters)}m
-                                @ ${formatUSD(lowVoltageCost)}/m
-                              </p>
-                              <p className='font-medium text-emerald-200'>
-                                Total: $
-                                {formatUSD(
-                                  costBreakdown.lowVoltageMeters *
-                                    lowVoltageCost
-                                )}
-                              </p>
-                            </div>
-                            <div className='space-y-0.5'>
-                              <p className='text-xs font-semibold text-emerald-500'>
-                                HV Wire
-                              </p>
-                              <p>
-                                {formatMeters(costBreakdown.highVoltageMeters)}m
-                                @ ${formatUSD(highVoltageCost)}/m
-                              </p>
-                              <p className='font-medium text-emerald-200'>
-                                Total: $
-                                {formatUSD(
-                                  costBreakdown.highVoltageMeters *
-                                    highVoltageCost
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Cost Difference Box */}
-                    {costBreakdown.grandTotal !== 0 &&
-                      solverOriginalCost > 0 && (
-                        <div
-                          className={`rounded-2xl border p-6 text-center ${
-                            isNegative
-                              ? 'border-emerald-500/30 bg-emerald-900/20'
-                              : 'border-red-500/30 bg-red-900/20'
-                          }`}
-                        >
-                          <p
-                            className={`text-xs font-bold tracking-widest uppercase ${
-                              isNegative ? 'text-emerald-400' : 'text-red-400'
-                            }`}
-                          >
-                            Cost Difference
-                          </p>
-                          <p
-                            className={`mt-1 text-4xl font-extrabold ${
-                              isNegative
-                                ? 'text-emerald-700 dark:text-emerald-300'
-                                : 'text-red-300'
-                            }`}
-                          >
-                            ${formatUSD(costDiff)}
-                          </p>
-                          <p className='mt-2 text-[10px] italic opacity-60'>
-                            {isNegative
-                              ? 'Savings vs Solver baseline'
-                              : 'Additional cost vs Solver baseline'}
-                          </p>
-                        </div>
-                      )}
-
-                    {miniGridNodes.length > 0 && (
-                      <div className='pt-4'>
-                        <h3 className='mb-4 text-xl font-semibold text-emerald-700 dark:text-emerald-300'>
-                          Export Options
-                        </h3>
-                        <div className='flex flex-col gap-3'>
-                          <button
-                            onClick={downloadKml}
-                            disabled={
-                              miniGridNodes.length === 0 ||
-                              miniGridEdges.length === 0
-                            }
-                            className='w-full rounded-xl bg-purple-600 py-4 font-semibold text-zinc-900 hover:bg-purple-700 disabled:opacity-50 dark:text-white'
-                          >
-                            📥 Download KML
-                          </button>
-
-                          <SaveMiniGridButton
-                            isAuthenticated={!!session?.user}
-                            onSave={handleSaveToDatabase}
-                            disabled={
-                              computingMiniGrid ||
-                              miniGridNodes.length === 0 ||
-                              savedRuns.length >= 10
-                            }
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <ExportSummary
+                    costBreakdown={costBreakdown}
+                    solverOriginalCost={solverOriginalCost}
+                    poleCost={poleCost}
+                    lowVoltageCost={lowVoltageCost}
+                    highVoltageCost={highVoltageCost}
+                    miniGridNodes={miniGridNodes}
+                    miniGridEdges={miniGridEdges}
+                    allowDragTerminals={allowDragTerminals}
+                    onAllowDragTerminalsChange={setAllowDragTerminals}
+                    onDownloadKml={downloadKml}
+                    onSaveToDatabase={handleSaveToDatabase}
+                    isAuthenticated={!!session?.user}
+                    savedRunsCount={savedRuns.length}
+                    computingMiniGrid={computingMiniGrid}
+                  />
                 )}
               </section>
 
-              {/* 4. Saved Mini-grids */}
-              <section>
-                <button
-                  onClick={() => toggleSection('savedGrids')}
-                  className='mb-6 flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 transition-all hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/30'
-                >
-                  <h2 className='light:text-emerald-700 text-lg font-bold text-emerald-700 dark:text-emerald-300'>
-                    Saved Mini-grids ({savedRuns.length}/10)
-                  </h2>
-                  <svg
-                    className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.savedGrids ? 'rotate-180' : ''}`}
-                    fill='none'
-                    stroke='currentColor'
-                    viewBox='0 0 24 24'
-                  >
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M19 14l-7 7m0 0l-7-7m7 7V3'
-                    />
-                  </svg>
-                </button>
-
-                {expandedSections.savedGrids && (
-                  <div className='space-y-4'>
-                    {/* Saved Runs (conditional) */}
-                    {session?.user && (
-                      <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm lg:col-span-9 xl:col-span-3 dark:bg-zinc-900/50'>
-                        {loadingSaved ? (
-                          <p className='py-4 text-sm text-emerald-400'>
-                            Loading…
-                          </p>
-                        ) : savedRuns.length === 0 ? (
-                          <p className='py-4 text-sm text-zinc-500 italic'>
-                            No saved runs yet
-                          </p>
-                        ) : (
-                          <div className='scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50 -mr-2 max-h-73 overflow-y-auto pr-2'>
-                            <div className='grid gap-4 sm:grid-cols-1 md:grid-cols-1 lg:grid-cols-1'>
-                              {savedRuns.map((run) => (
-                                <div
-                                  key={run.id}
-                                  className='group relative cursor-pointer rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 transition-all hover:border-emerald-700/50 hover:bg-zinc-900/60'
-                                  onClick={() => loadSavedRun(run)}
-                                >
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteRun(run.id, run.name);
-                                    }}
-                                    className='absolute top-2 right-2 rounded-full bg-red-900/60 p-1.5 text-red-300 opacity-70 transition hover:opacity-100'
-                                    title='Delete run'
-                                  >
-                                    <svg
-                                      className='h-4 w-4'
-                                      fill='none'
-                                      stroke='currentColor'
-                                      viewBox='0 0 24 24'
-                                    >
-                                      <path
-                                        strokeLinecap='round'
-                                        strokeLinejoin='round'
-                                        strokeWidth={2}
-                                        d='M6 18L18 6M6 6l12 12'
-                                      />
-                                    </svg>
-                                  </button>
-
-                                  <h4 className='truncate font-medium text-emerald-700 group-hover:text-emerald-200 dark:text-emerald-300/90'>
-                                    {run.name || 'Untitled'}
-                                  </h4>
-                                  <p className='mt-1 text-xs text-zinc-500'>
-                                    {run.fileName
-                                      ? `File: ${run.fileName}`
-                                      : 'Test data'}
-                                  </p>
-                                  <p className='mt-0.5 text-xs text-zinc-600'>
-                                    {new Date(run.createdAt).toLocaleString()}
-                                    <br />
-                                    {run.miniGridNodes?.length || '?'} nodes |{' '}
-                                    <span className='font-medium text-green-600'>
-                                      {new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                      }).format(run.costBreakdown.grandTotal)}
-                                    </span>
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
+              {/* 4. Saved Mini-grids Section */}
+              <SavedGridsSection
+                savedRuns={savedRuns}
+                loadingSaved={loadingSaved}
+                expanded={expandedSections.savedGrids}
+                onToggle={() => toggleSection('savedGrids')}
+                onLoadRun={loadSavedRun}
+                onDeleteRun={handleDeleteRun}
+              />
             </div>
             <br />
             <hr />
@@ -3370,143 +2524,31 @@ export default function DemoPage() {
           </div>
         </div>
 
-        {/* Floating Action Buttons - Horizontal Row */}
-        <div className='fixed right-40 bottom-5 z-50 flex items-center gap-3'>
-          {/* DRAW EDGE BUTTON - Now floating! */}
-          {/*<button*/}
-          {/*  onClick={() => {*/}
-          {/*    setIsDrawingMode((prev) => {*/}
-          {/*      const newMode = !prev;*/}
-          {/*      if (!newMode) setFirstSelectedPoint(null);*/}
-          {/*      return newMode;*/}
-          {/*    });*/}
-          {/*  }}*/}
-          {/*  className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium shadow-2xl transition-all active:scale-95 ${*/}
-          {/*    isDrawingMode*/}
-          {/*      ? 'bg-purple-600 text-white ring-2 ring-purple-400/50'*/}
-          {/*      : 'bg-zinc-700 text-white hover:bg-zinc-600'*/}
-          {/*  }`}*/}
-          {/*  title={*/}
-          {/*    isDrawingMode*/}
-          {/*      ? 'Exit drawing mode'*/}
-          {/*      : 'Draw new edge between 2 markers'*/}
-          {/*  }*/}
-          {/*>*/}
-          {/*  <svg*/}
-          {/*    xmlns='http://www.w3.org/2000/svg'*/}
-          {/*    className='h-5 w-5'*/}
-          {/*    fill='none'*/}
-          {/*    viewBox='0 0 24 24'*/}
-          {/*    stroke='currentColor'*/}
-          {/*    strokeWidth={2.5}*/}
-          {/*  >*/}
-          {/*    <path*/}
-          {/*      strokeLinecap='round'*/}
-          {/*      strokeLinejoin='round'*/}
-          {/*      d='M15 12a3 3 0 11-6 0 3 3 0 016 0z'*/}
-          {/*    />*/}
-          {/*    <path*/}
-          {/*      strokeLinecap='round'*/}
-          {/*      strokeLinejoin='round'*/}
-          {/*      d='M17 8l-4 4-4-4'*/}
-          {/*    />*/}
-          {/*    <path*/}
-          {/*      strokeLinecap='round'*/}
-          {/*      strokeLinejoin='round'*/}
-          {/*      d='M3 8l4 4 4-4'*/}
-          {/*    />*/}
-          {/*  </svg>*/}
-          {/*  {isDrawingMode ? 'Drawing Mode' : 'Draw Edge'}*/}
-          {/*</button>*/}
-
-          {/* Undo Button (unchanged) */}
-          <button
-            onClick={() => {
-              const s = undo();
-              if (s) {
-                setDataPoints(s.dataPoints);
-                setMiniGridNodes(s.miniGridNodes);
-                setMiniGridEdges(s.miniGridEdges);
-                setCostBreakdown(s.costBreakdown);
-              }
-            }}
-            disabled={!canUndo}
-            className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
-            title='Undo (Ctrl/Cmd + Z)'
-          >
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              className='h-4 w-4'
-              fill='none'
-              viewBox='0 0 24 24'
-              stroke='currentColor'
-              strokeWidth={2.5}
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                d='M3 10h10a8 8 0 018 8v2M3 10l6 6 6-6'
-              />
-            </svg>
-            Undo
-          </button>
-
-          {/* Redo Button (unchanged) */}
-          <button
-            onClick={() => {
-              const s = redo();
-              if (s) {
-                setDataPoints(s.dataPoints);
-                setMiniGridNodes(s.miniGridNodes);
-                setMiniGridEdges(s.miniGridEdges);
-                setCostBreakdown(s.costBreakdown);
-              }
-            }}
-            disabled={!canRedo}
-            className='flex items-center gap-2 rounded-full bg-amber-600/90 px-5 py-3 text-sm font-medium text-white shadow-2xl transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50'
-            title='Redo (Ctrl/Cmd + Shift + Z)'
-          >
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              className='h-4 w-4'
-              fill='none'
-              viewBox='0 0 24 24'
-              stroke='currentColor'
-              strokeWidth={2.5}
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                d='M21 10h-10a8 8 0 00-8 8v2m18-10l-6 6-6-6'
-              />
-            </svg>
-            Redo
-          </button>
-
-          {/* Reset Button (unchanged) */}
-          <button
-            onClick={handleResetMap}
-            disabled={dataPoints.length === 0 && miniGridNodes.length === 0}
-            className='flex items-center gap-2 rounded-full bg-red-600/90 px-6 py-3 text-sm font-medium text-zinc-900 shadow-2xl transition-all hover:bg-red-600 active:scale-95 disabled:opacity-50 dark:text-white'
-            title='Reset everything'
-          >
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              className='h-4 w-4'
-              fill='none'
-              stroke='currentColor'
-              viewBox='0 0 24 24'
-              strokeWidth={2.5}
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
-              />
-            </svg>
-            Reset
-          </button>
-        </div>
+        {/* Floating Action Buttons - Map Controls */}
+        <MapControls
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={() => {
+            const s = undo();
+            if (s) {
+              setDataPoints(s.dataPoints);
+              setMiniGridNodes(s.miniGridNodes);
+              setMiniGridEdges(s.miniGridEdges);
+              setCostBreakdown(s.costBreakdown);
+            }
+          }}
+          onRedo={() => {
+            const s = redo();
+            if (s) {
+              setDataPoints(s.dataPoints);
+              setMiniGridNodes(s.miniGridNodes);
+              setMiniGridEdges(s.miniGridEdges);
+              setCostBreakdown(s.costBreakdown);
+            }
+          }}
+          onReset={handleResetMap}
+          hasData={dataPoints.length > 0 || miniGridNodes.length > 0}
+        />
 
         {/* FOOTER - Minimal */}
         <footer className='border-t border-zinc-800 bg-zinc-950 py-4 text-center text-xs text-zinc-600'>
@@ -3520,96 +2562,13 @@ export default function DemoPage() {
         />
       </div>
       {/* Dialog for adding a point via map click */}
-      <Dialog
-        open={isAddPointDialogOpen}
+      <AddPointDialog
+        isOpen={isAddPointDialogOpen}
         onOpenChange={setIsAddPointDialogOpen}
-      >
-        <DialogContent className='border-zinc-800 bg-zinc-900 text-white sm:max-w-[425px]'>
-          <DialogHeader>
-            <DialogTitle>Add New Point</DialogTitle>
-            <DialogDescription className='text-zinc-400'>
-              Set the details for the location you just clicked.
-            </DialogDescription>
-          </DialogHeader>
-          <div className='grid gap-4 py-4'>
-            <div className='grid grid-cols-4 items-center gap-4'>
-              <label className='text-right text-sm'>Name</label>
-              <input
-                value={newPointDetails.name}
-                onChange={(e) =>
-                  setNewPointDetails({
-                    ...newPointDetails,
-                    name: e.target.value,
-                  })
-                }
-                className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
-              />
-            </div>
-            <div className='grid grid-cols-4 items-center gap-4'>
-              <label className='text-right text-sm'>Type</label>
-              <select
-                value={newPointDetails.type}
-                onChange={(e) =>
-                  setNewPointDetails({
-                    ...newPointDetails,
-                    type: e.target.value as 'source' | 'terminal' | 'pole',
-                  })
-                }
-                className='col-span-3 rounded-md border-zinc-700 bg-zinc-800 px-3 py-2 text-sm'
-              >
-                <option value='terminal'>Terminal</option>
-                <option value='source'>Source</option>
-                <option value='pole'>Pole</option>
-              </select>
-            </div>
-          </div>
-          <DialogFooter>
-            <button
-              onClick={() => setIsAddPointDialogOpen(false)}
-              className='px-4 py-2 text-sm text-zinc-400 hover:text-white'
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirmNewPoint}
-              className='rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-700'
-            >
-              Add Point
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        newPointDetails={newPointDetails}
+        onNewPointDetailsChange={setNewPointDetails}
+        onConfirm={handleConfirmNewPoint}
+      />
     </div>
-  );
-}
-
-// Save Button Component
-function SaveMiniGridButton({
-  isAuthenticated,
-  onSave,
-  disabled,
-}: {
-  isAuthenticated: boolean;
-  onSave: () => void;
-  disabled: boolean;
-}) {
-  if (!isAuthenticated) {
-    return (
-      <button
-        disabled
-        className='w-full cursor-not-allowed rounded-xl bg-zinc-700 py-4 text-zinc-400'
-      >
-        Sign in to Save
-      </button>
-    );
-  }
-  return (
-    <button
-      onClick={onSave}
-      disabled={disabled}
-      className='w-full rounded-xl bg-emerald-600 py-4 font-semibold text-zinc-900 hover:bg-emerald-700 disabled:opacity-50 dark:text-white'
-    >
-      💾 Save to My Mini-Grids
-    </button>
   );
 }

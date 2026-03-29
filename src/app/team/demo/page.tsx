@@ -189,7 +189,7 @@ export default function DemoPage() {
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >({
-    locations: false,
+    markers: false,
     solver_cost: false,
     export: false,
     savedGrids: false,
@@ -258,6 +258,8 @@ export default function DemoPage() {
     miniGridNodes,
     miniGridEdges,
     costBreakdown,
+    lowVoltageCost,
+    highVoltageCost,
     saveState,
   });
 
@@ -268,9 +270,19 @@ export default function DemoPage() {
       miniGridNodes,
       miniGridEdges,
       costBreakdown,
+      lowVoltageCost,
+      highVoltageCost,
       saveState,
     };
-  }, [dataPoints, miniGridNodes, miniGridEdges, costBreakdown, saveState]);
+  }, [
+    dataPoints,
+    miniGridNodes,
+    miniGridEdges,
+    costBreakdown,
+    lowVoltageCost,
+    highVoltageCost,
+    saveState,
+  ]);
 
   // Helper to bundle current state for the hook
   const captureState = (overrides = {}) => ({
@@ -378,6 +390,69 @@ export default function DemoPage() {
     },
     [saveState] // Only depend on saveState; internal data comes from stateRef
   );
+
+  const handleDeleteEdge = useCallback((clickedEdge: MiniGridEdge) => {
+    const current = stateRef.current;
+
+    if (
+      !window.confirm(
+        `Delete this ${clickedEdge.voltage.toUpperCase()} edge (${formatMeters(
+          clickedEdge.lengthMeters
+        )} m)?`
+      )
+    ) {
+      return;
+    }
+
+    // Remove the edge (handles both forward and reverse direction)
+    const updatedEdges = current.miniGridEdges.filter((e) => {
+      const sameForward =
+        Math.abs(e.start.lat - clickedEdge.start.lat) < 1e-9 &&
+        Math.abs(e.start.lng - clickedEdge.start.lng) < 1e-9 &&
+        Math.abs(e.end.lat - clickedEdge.end.lat) < 1e-9 &&
+        Math.abs(e.end.lng - clickedEdge.end.lng) < 1e-9;
+
+      const sameReverse =
+        Math.abs(e.start.lat - clickedEdge.end.lat) < 1e-9 &&
+        Math.abs(e.start.lng - clickedEdge.end.lng) < 1e-9 &&
+        Math.abs(e.end.lat - clickedEdge.start.lat) < 1e-9 &&
+        Math.abs(e.end.lng - clickedEdge.start.lng) < 1e-9;
+
+      return !(sameForward || sameReverse);
+    });
+
+    // Calculate cost delta
+    const isLow = clickedEdge.voltage === 'low';
+    const deltaMeters = clickedEdge.lengthMeters;
+    const deltaWire =
+      deltaMeters * (isLow ? current.lowVoltageCost : current.highVoltageCost);
+
+    const newCostBreakdown: CostBreakdown = {
+      ...current.costBreakdown,
+      lowVoltageMeters:
+        current.costBreakdown.lowVoltageMeters - (isLow ? deltaMeters : 0),
+      highVoltageMeters:
+        current.costBreakdown.highVoltageMeters - (isLow ? 0 : deltaMeters),
+      totalMeters: current.costBreakdown.totalMeters - deltaMeters,
+      lowWireCost: current.costBreakdown.lowWireCost - (isLow ? deltaWire : 0),
+      highWireCost:
+        current.costBreakdown.highWireCost - (isLow ? 0 : deltaWire),
+      wireCost: current.costBreakdown.wireCost - deltaWire,
+      grandTotal: current.costBreakdown.grandTotal - deltaWire,
+    };
+
+    // Update React state
+    setMiniGridEdges(updatedEdges);
+    setCostBreakdown(newCostBreakdown);
+
+    // Save to history
+    current.saveState({
+      dataPoints: current.dataPoints,
+      miniGridNodes: current.miniGridNodes,
+      miniGridEdges: updatedEdges,
+      costBreakdown: newCostBreakdown,
+    });
+  }, []); // no extra deps needed — everything comes from the live ref
 
   // ==================== MARKER & DRAG LOGIC ====================
   const createMarker = useCallback(
@@ -745,33 +820,6 @@ export default function DemoPage() {
     }
   }, [newPointDetails.type, dataPoints, isAddPointDialogOpen]);
 
-  useEffect(() => {
-    if (!map) return;
-
-    const listener = map.addListener(
-      'click',
-      (e: google.maps.MapMouseEvent) => {
-        if (e.latLng) {
-          setPendingPoint({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-
-          setNewPointDetails({
-            name: '',
-            type: 'terminal',
-          });
-          setIsAddPointDialogOpen(true);
-        }
-        setExpandedSections({
-          locations: false,
-          solver_cost: true,
-          export: false,
-          savedGrids: false,
-        });
-      }
-    );
-
-    return () => google.maps.event.removeListener(listener);
-  }, [map, dataPoints]);
-
   // 1. Wrap initMap in useCallback to stabilize it
   const initMap = useCallback(() => {
     // Only initialize if the global object exists, the ref is ready, and we haven't already set a map state
@@ -853,6 +901,14 @@ export default function DemoPage() {
         strokeWeight: weight,
         map,
       });
+
+      // NEW: Make the edge clickable for deletion
+      polyline.set('edgeData', { ...edge }); // safe copy
+      polyline.addListener('click', () => {
+        const edgeData = polyline.get('edgeData') as MiniGridEdge;
+        if (edgeData) handleDeleteEdge(edgeData);
+      });
+
       polylinesRef.current.push(polyline);
     });
   }, [map, miniGridEdges]);
@@ -1198,7 +1254,7 @@ export default function DemoPage() {
     processFile(file);
     setAllowDragTerminals(true);
     setExpandedSections({
-      locations: false,
+      markers: false,
       solver_cost: true,
       export: false,
       savedGrids: false,
@@ -1466,7 +1522,7 @@ export default function DemoPage() {
     }
 
     if (points.length < count) {
-      throw new Error(`Could not generate ${count} unique locations.`);
+      throw new Error(`Could not generate ${count} unique markers.`);
     }
 
     const newDataPoints = points; // we already have the array
@@ -1500,7 +1556,7 @@ export default function DemoPage() {
     // ... other set calls ...
 
     setExpandedSections({
-      locations: false,
+      markers: false,
       solver_cost: true,
       export: false,
       savedGrids: false,
@@ -1748,7 +1804,7 @@ export default function DemoPage() {
     }
     setAllowDragTerminals(false);
     setExpandedSections({
-      locations: false,
+      markers: false,
       solver_cost: false,
       export: true,
       savedGrids: false,
@@ -2004,7 +2060,7 @@ export default function DemoPage() {
 
     alert(`Loaded: ${run.name || 'Mini-grid run'}`);
     setExpandedSections({
-      locations: false,
+      markers: false,
       solver_cost: false,
       export: true,
       savedGrids: false,
@@ -2112,7 +2168,7 @@ export default function DemoPage() {
       }
 
       setExpandedSections({
-        locations: false,
+        markers: false,
         solver_cost: false,
         export: false,
         savedGrids: true,
@@ -2214,14 +2270,14 @@ export default function DemoPage() {
               {/* 1. Define Marker Section */}
               <section>
                 <button
-                  onClick={() => toggleSection('locations')}
+                  onClick={() => toggleSection('markers')}
                   className='mb-6 flex w-full items-center justify-between rounded-xl bg-emerald-100 px-4 py-3 transition hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/40'
                 >
                   <h2 className='light:text-emerald-700 text-xl font-bold text-emerald-700 dark:text-emerald-300'>
                     1. Define Markers
                   </h2>
                   <svg
-                    className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.locations ? 'rotate-180' : ''}`}
+                    className={`h-5 w-5 text-emerald-600 transition-transform dark:text-emerald-400 ${expandedSections.markers ? 'rotate-180' : ''}`}
                     fill='none'
                     stroke='currentColor'
                     viewBox='0 0 24 24'
@@ -2235,19 +2291,41 @@ export default function DemoPage() {
                   </svg>
                 </button>
 
-                {expandedSections.locations && (
+                {expandedSections.markers && (
                   <div className='space-y-4'>
                     {/* Click to Set Marker*/}
                     <div className='rounded-xl border border-zinc-700/70 bg-white p-6 backdrop-blur-sm dark:bg-zinc-900/50'>
-                      <p className='text-sm'>
-                        <i>Click on the map to place a marker at any time.</i>
-                      </p>
-                      <p className='text-sm'>
-                        <i>
-                          Drag markers to adjust placement. Edges cannot exceed
-                          30 meters
-                        </i>
-                      </p>
+                      <ul className='space-y-3 text-sm'>
+                        <li className='flex items-start gap-3'>
+                          <span className='mt-1 text-emerald-500'>•</span>
+                          <span>
+                            <strong>Click on the map</strong> to place a marker.
+                            Click the <strong>×</strong> button to delete a
+                            marker.
+                          </span>
+                        </li>
+                        <li className='flex items-start gap-3'>
+                          <span className='mt-1 text-emerald-500'>•</span>
+                          <span>
+                            <strong>Drag markers</strong> to adjust their
+                            placement. Edges cannot exceed{' '}
+                            <strong>30 meters</strong>.
+                          </span>
+                        </li>
+                        {/*<li className='flex items-start gap-3'>*/}
+                        {/*  <span className='mt-1 text-emerald-500'>•</span>*/}
+                        {/*  <span>*/}
+                        {/*    <strong>Use the Draw Edge</strong> feature to draw*/}
+                        {/*    an edge between markers.*/}
+                        {/*  </span>*/}
+                        {/*</li>*/}
+                        <li className='flex items-start gap-3'>
+                          <span className='mt-1 text-emerald-500'>•</span>
+                          <span>
+                            <strong>Click on an Edge</strong> to delete it.
+                          </span>
+                        </li>
+                      </ul>
                     </div>
 
                     {/* Generate Test Data Card */}
@@ -3202,12 +3280,58 @@ export default function DemoPage() {
 
         {/* Floating Action Buttons - Horizontal Row */}
         <div className='fixed right-40 bottom-5 z-50 flex items-center gap-3'>
-          {/* Undo Button */}
+          {/* DRAW EDGE BUTTON - Now floating! */}
+          {/*<button*/}
+          {/*  onClick={() => {*/}
+          {/*    setIsDrawingMode((prev) => {*/}
+          {/*      const newMode = !prev;*/}
+          {/*      if (!newMode) setFirstSelectedPoint(null);*/}
+          {/*      return newMode;*/}
+          {/*    });*/}
+          {/*  }}*/}
+          {/*  className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium shadow-2xl transition-all active:scale-95 ${*/}
+          {/*    isDrawingMode*/}
+          {/*      ? 'bg-purple-600 text-white ring-2 ring-purple-400/50'*/}
+          {/*      : 'bg-zinc-700 text-white hover:bg-zinc-600'*/}
+          {/*  }`}*/}
+          {/*  title={*/}
+          {/*    isDrawingMode*/}
+          {/*      ? 'Exit drawing mode'*/}
+          {/*      : 'Draw new edge between 2 markers'*/}
+          {/*  }*/}
+          {/*>*/}
+          {/*  <svg*/}
+          {/*    xmlns='http://www.w3.org/2000/svg'*/}
+          {/*    className='h-5 w-5'*/}
+          {/*    fill='none'*/}
+          {/*    viewBox='0 0 24 24'*/}
+          {/*    stroke='currentColor'*/}
+          {/*    strokeWidth={2.5}*/}
+          {/*  >*/}
+          {/*    <path*/}
+          {/*      strokeLinecap='round'*/}
+          {/*      strokeLinejoin='round'*/}
+          {/*      d='M15 12a3 3 0 11-6 0 3 3 0 016 0z'*/}
+          {/*    />*/}
+          {/*    <path*/}
+          {/*      strokeLinecap='round'*/}
+          {/*      strokeLinejoin='round'*/}
+          {/*      d='M17 8l-4 4-4-4'*/}
+          {/*    />*/}
+          {/*    <path*/}
+          {/*      strokeLinecap='round'*/}
+          {/*      strokeLinejoin='round'*/}
+          {/*      d='M3 8l4 4 4-4'*/}
+          {/*    />*/}
+          {/*  </svg>*/}
+          {/*  {isDrawingMode ? 'Drawing Mode' : 'Draw Edge'}*/}
+          {/*</button>*/}
+
+          {/* Undo Button (unchanged) */}
           <button
             onClick={() => {
               const s = undo();
               if (s) {
-                // You must restore EVERYTHING tracked in HistoryState
                 setDataPoints(s.dataPoints);
                 setMiniGridNodes(s.miniGridNodes);
                 setMiniGridEdges(s.miniGridEdges);
@@ -3235,12 +3359,11 @@ export default function DemoPage() {
             Undo
           </button>
 
-          {/* Redo Button */}
+          {/* Redo Button (unchanged) */}
           <button
             onClick={() => {
               const s = redo();
               if (s) {
-                // You must restore EVERYTHING tracked in HistoryState
                 setDataPoints(s.dataPoints);
                 setMiniGridNodes(s.miniGridNodes);
                 setMiniGridEdges(s.miniGridEdges);
@@ -3268,7 +3391,7 @@ export default function DemoPage() {
             Redo
           </button>
 
-          {/* Reset Button */}
+          {/* Reset Button (unchanged) */}
           <button
             onClick={handleResetMap}
             disabled={dataPoints.length === 0 && miniGridNodes.length === 0}

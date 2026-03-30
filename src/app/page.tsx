@@ -57,7 +57,7 @@ export default function Home() {
 
         <div className='mt-10 flex flex-col items-center gap-3 sm:flex-row'>
           <a
-            href='/tool'
+            href='/minigrid-tool'
             className='inline-flex items-center justify-center rounded-xl bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition-all hover:bg-emerald-500 hover:shadow-xl hover:shadow-emerald-500/40 focus:ring-2 focus:ring-emerald-400/50 focus:outline-none active:scale-[0.985]'
           >
             Use the Tool

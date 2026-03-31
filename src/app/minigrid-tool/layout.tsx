@@ -1,7 +1,7 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Project Demo • Renewvia',
+  title: 'Mini-Grid Solver Tool',
   description: 'Solar Mini-Grid Powerline Solver Tool',
   icons: { icon: '/favicon.ico' },
 };

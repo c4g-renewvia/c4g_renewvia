@@ -73,7 +73,7 @@ const highVoltageColor = '#8B5CF6';
 const lowVoltageColor = '#3B82F6';
 
 // ==================== MAIN COMPONENT ====================
-export default function DemoPage() {
+export default function MiniGridToolPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
@@ -792,7 +792,7 @@ export default function DemoPage() {
     return `${typeLabel} ${String(nextNumber).padStart(2, '0')}`;
   };
 
-  // Inside DemoPage component, near your other useEffects
+  // Inside MiniGridToolPage component, near your other useEffects
   // Replace the old useEffect with this one
   useEffect(() => {
     if (!isAddPointDialogOpen) return;
@@ -2547,7 +2547,7 @@ export default function DemoPage() {
 
         {/* FOOTER - Minimal */}
         <footer className='border-t border-zinc-200 bg-white py-4 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400'>
-          © 2026 • CS 6150 Computing For Good • Renewvia Project Demo
+          © 2026 • CS 6150 Computing For Good • Mini-Grid Solver Tool
         </footer>
 
         <Script

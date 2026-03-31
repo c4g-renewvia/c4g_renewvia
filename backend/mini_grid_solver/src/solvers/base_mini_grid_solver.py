@@ -627,7 +627,7 @@ class BaseMiniGridSolver(ABC):
 
         """
         one_meter_deg = 1 / 111111.0
-        grid_size = 5
+        grid_size = 10
         grid = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
         grid_points = [(lat, lng) for lat in grid for lng in grid]
 
@@ -694,7 +694,7 @@ class BaseMiniGridSolver(ABC):
         print(f"Local optimization finished. Cost: {final_cost:.2f} (was {self._compute_total_cost(graph):.2f})")
 
         return best_graph
-    
+
     @staticmethod
     def _get_num_poles_and_wire_length(graph: Union[nx.Graph, nx.DiGraph]):
         low_m = high_m = 0.0

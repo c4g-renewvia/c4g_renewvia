@@ -357,7 +357,7 @@ class BaseMiniGridSolver(ABC):
         # 1. Parse input and input into abstract solver method
         graph = self._solve(self.parse_and_validate_input(poles=True))
 
-        # graph = self._post_solver_local_opt(graph)
+        graph = self._post_solver_local_opt(graph)
 
         return self.build_solver_result(graph)
 
@@ -626,51 +626,75 @@ class BaseMiniGridSolver(ABC):
             graph (Union[nx.Graph, nx.DiGraph]): The graph resulting from the main solver.
 
         """
-        # defne small grid of distances to move the poles
-        one_meter_deg = 1 / 111111  # rough conversion from meters to degrees
+        one_meter_deg = 1 / 111111.0
+        grid_size = 5
+        grid = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
+        grid_points = [(lat, lng) for lat in grid for lng in grid]
 
-        # 5 x 5 grid
-        grid_size = 20
-        grid_lat = np.linspace(-one_meter_deg * grid_size, one_meter_deg * grid_size, grid_size)
-
-        grid_lng = grid_lat
-
-        # grid of tuples
-        grid_points = [(lat, lng) for lat in grid_lat for lng in grid_lng]
-
-        print(grid_points)
-
-        current_graph = graph.copy()
         best_graph = graph.copy()
+        best_total_cost = self._compute_total_cost(best_graph)
 
-        for node in graph.nodes(data=True):
-            node_idx, node_data = node
-            # only grab poles that are connected to the terminals
-            if graph.is_directed():
-                is_leaf = graph.out_degree(node_idx) == 1
-            else:
-                is_leaf = graph.degree(node_idx) == 1
-            if is_leaf:
-                best_cost = self._compute_total_cost(current_graph)
-                best_move = None
-                for move in grid_points:
-                    new_lat, new_lng = node_data['lat'] + move[0], node_data['lng'] + move[1]
-                    current_graph.nodes[node_idx]['lat'] = new_lat
-                    current_graph.nodes[node_idx]['lng'] = new_lng
-                    # recalculate the edges
+        print(f"Starting local opt. Initial cost: {best_total_cost:.2f}")
 
-                    new_cost = self._compute_total_cost(current_graph)
-                    if new_cost < best_cost:
-                        best_cost = new_cost
-                        best_move = move
+        for node_idx, node_data in list(graph.nodes(data=True)):
+            if node_data['type'] != "pole":
+                continue
 
-                if best_move is not None:
-                    print(f"Moving pole {node_idx} by {best_move} for cost improvement of {best_cost}")
-                    best_graph.nodes[node_idx]['lat'] = node.lat + best_move[0]
-                    best_graph.nodes[node_idx]['lng'] = node.lng + best_move[1]
+            original_lat = node_data['lat']
+            original_lng = node_data['lng']
+
+            local_best_cost = best_total_cost
+            local_best_pos = (original_lat, original_lng)
+
+            for dlat, dlng in grid_points:
+                test_lat = original_lat + dlat
+                test_lng = original_lng + dlng
+
+                # Temporarily move in best_graph
+                best_graph.nodes[node_idx]['lat'] = test_lat
+                best_graph.nodes[node_idx]['lng'] = test_lng
+
+                # Recompute all edges connected to this pole
+                for u, v in list(best_graph.edges(node_idx)):
+                    length = self.haversine_meters(
+                        best_graph.nodes[u]['lat'], best_graph.nodes[u]['lng'],
+                        best_graph.nodes[v]['lat'], best_graph.nodes[v]['lng']
+                    )
+                    best_graph[u][v]['length'] = length
+                    best_graph[u][v]['weight'] = self.calc_edge_weight(length,
+                                                                       best_graph[u][v].get('voltage', 'low'))
+
+                new_cost = self._compute_total_cost(best_graph)
+
+                if new_cost < local_best_cost:
+                    local_best_cost = new_cost
+                    local_best_pos = (test_lat, test_lng)
+                    if self.request.debug:
+                        print(f"  Better position for pole {node_idx}: Δcost = {best_total_cost - new_cost:.4f}")
+
+            # Apply best position found for this pole
+            best_graph.nodes[node_idx]['lat'] = local_best_pos[0]
+            best_graph.nodes[node_idx]['lng'] = local_best_pos[1]
+
+            # Recompute edges one final time for this pole
+            for u, v in list(best_graph.edges(node_idx)):
+                length = self.haversine_meters(
+                    best_graph.nodes[u]['lat'], best_graph.nodes[u]['lng'],
+                    best_graph.nodes[v]['lat'], best_graph.nodes[v]['lng']
+                )
+                best_graph[u][v]['length'] = length
+                best_graph[u][v]['weight'] = self.calc_edge_weight(length,
+                                                                   best_graph[u][v].get('voltage', 'low'))
+
+            if local_best_cost < best_total_cost:
+                best_total_cost = local_best_cost
+                print(f"Pole {node_idx} improved cost to {best_total_cost:.2f}")
+
+        final_cost = self._compute_total_cost(best_graph)
+        print(f"Local optimization finished. Cost: {final_cost:.2f} (was {self._compute_total_cost(graph):.2f})")
 
         return best_graph
-
+    
     @staticmethod
     def _get_num_poles_and_wire_length(graph: Union[nx.Graph, nx.DiGraph]):
         low_m = high_m = 0.0

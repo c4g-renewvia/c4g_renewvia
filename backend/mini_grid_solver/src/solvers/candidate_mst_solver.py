@@ -164,6 +164,7 @@ class CandidateMSTSolver(BaseMiniGridSolver):
                 weight=self.calc_edge_weight(segment_length, voltage=voltage),
             )
 
+        # remove original edges
         new_graph.graph.update(graph.graph)
         return new_graph
 

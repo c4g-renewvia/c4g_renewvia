@@ -22,7 +22,6 @@ backend/
             ├── mst_solver.py               # Simple MST baseline solver
             ├── registry.py                 # Solver registration utility
             ├── steinerized_mst.py          # MST with edge fragmentation
-            └── voronoi_mst_solver.py       # Solver using static Voronoi vertices
         │
         └── utils/
             ├── __init__.py

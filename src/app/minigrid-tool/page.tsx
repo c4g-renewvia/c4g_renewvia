@@ -97,6 +97,24 @@ export default function MiniGridToolPage() {
   const [lowVoltageCost, setLowVoltageCost] = useState<number>(10);
   const [highVoltageCost, setHighVoltageCost] = useState<number>(20);
 
+  const [
+    lowVoltagePoleToPoleLengthConstraint,
+    setLowVoltagePoleToPoleLengthConstraint,
+  ] = useState<number>(30);
+  const [
+    lowVoltagePoleToTerminalLengthConstraint,
+    setLowVoltagePoleToTerminalLengthConstraint,
+  ] = useState<number>(20);
+
+  const [
+    highVoltagePoleToPoleLengthConstraint,
+    setHighVoltagePoleToPoleLengthConstraint,
+  ] = useState<number>(50);
+  const [
+    highVoltagePoleToTerminalLengthConstraint,
+    setHighVoltagePoleToTerminalLengthConstraint,
+  ] = useState<number>(20);
+
   const [costBreakdown, setCostBreakdown] = useState<CostBreakdown>({
     lowVoltageMeters: 0,
     highVoltageMeters: 0,
@@ -425,7 +443,6 @@ export default function MiniGridToolPage() {
     });
   }, []); // no extra deps needed — everything comes from the live ref
 
-  // ==================== MARKER & DRAG LOGIC ====================
   const createMarker = useCallback(
     (
       point: {
@@ -436,7 +453,7 @@ export default function MiniGridToolPage() {
       },
       map: google.maps.Map
     ) => {
-      const type = point.type || 'terminal'; // raw uploaded points → treat as 'terminal'
+      const type = point.type || 'terminal';
 
       let displayTitle = point.name;
       if (point.type && !point.name.toLowerCase().includes(`(${point.type}`)) {
@@ -451,38 +468,36 @@ export default function MiniGridToolPage() {
       switch (type) {
         case 'source':
           iconUrl += 'green-dot.png';
-          labelColor = '#00ff00'; // bright green
+          labelColor = '#00ff00';
           scaledSize = new google.maps.Size(44, 44);
           break;
-
         case 'terminal':
           iconUrl += 'blue-dot.png';
           labelColor = 'white';
-          // keep default size
           break;
-
         case 'pole':
           iconUrl += 'yellow-dot.png';
           scaledSize = new google.maps.Size(28, 28);
           fontSize = '11px';
-          labelColor = '#ffff99'; // light yellow for visibility
+          labelColor = '#ffff99';
           break;
-
         default:
           iconUrl += 'red-dot.png';
       }
 
-      // Create custom content for AdvancedMarkerElement
+      // === Build custom content properly ===
       const content = document.createElement('div');
       content.style.display = 'flex';
       content.style.flexDirection = 'column';
       content.style.alignItems = 'center';
       content.style.position = 'relative';
+      content.style.pointerEvents = 'auto'; // Important for clicks
 
+      // Icon wrapper with delete button
       const iconWrapper = document.createElement('div');
       iconWrapper.style.position = 'relative';
-      iconWrapper.style.width = '44px'; // Set to your largest marker width
-      iconWrapper.style.height = '44px'; // Set to your largest marker height
+      iconWrapper.style.width = '44px';
+      iconWrapper.style.height = '44px';
       iconWrapper.style.display = 'flex';
       iconWrapper.style.alignItems = 'center';
       iconWrapper.style.justifyContent = 'center';
@@ -491,16 +506,52 @@ export default function MiniGridToolPage() {
       iconImg.src = iconUrl;
       iconImg.style.width = `${scaledSize.width}px`;
       iconImg.style.height = `${scaledSize.height}px`;
+      iconImg.style.pointerEvents = 'none'; // Let wrapper handle events
 
       iconWrapper.appendChild(iconImg);
 
+      // Delete button (×)
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.position = 'absolute';
+      deleteBtn.style.top = '-4px';
+      deleteBtn.style.right = '-4px';
+      deleteBtn.style.background = '#ef4444';
+      deleteBtn.style.color = 'white';
+      deleteBtn.style.border = 'none';
+      deleteBtn.style.borderRadius = '9999px';
+      deleteBtn.style.width = '18px';
+      deleteBtn.style.height = '18px';
+      deleteBtn.style.fontSize = '14px';
+      deleteBtn.style.lineHeight = '1';
+      deleteBtn.style.cursor = 'pointer';
+      deleteBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)';
+      deleteBtn.style.zIndex = '100';
+      deleteBtn.style.pointerEvents = 'auto';
+
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopImmediatePropagation(); // Crucial: prevent map/marker events
+        e.preventDefault();
+
+        if (window.confirm(`Delete ${point.name}?`)) {
+          handleRemovePoint(point.name);
+        }
+      });
+
+      iconWrapper.appendChild(deleteBtn);
+
+      // Label below the icon
       const labelSpan = document.createElement('span');
       labelSpan.textContent = point.name;
       labelSpan.style.color = labelColor;
       labelSpan.style.fontSize = fontSize;
       labelSpan.style.fontWeight = 'bold';
-      labelSpan.style.textShadow = '0 0 2px black'; // Better visibility on satellite map
-      labelSpan.style.marginTop = '2px';
+      labelSpan.style.textShadow = '0 0 3px black';
+      labelSpan.style.marginTop = '3px';
+      labelSpan.style.pointerEvents = 'none';
+
+      // Assemble in correct order
+      content.appendChild(iconWrapper);
       content.appendChild(labelSpan);
 
       const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -510,6 +561,9 @@ export default function MiniGridToolPage() {
         title: displayTitle,
         gmpDraggable: true,
       });
+
+      // === Drag logic remains mostly the same ===
+      // (your existing dragstart, drag, dragend listeners go here)
 
       marker.addListener('dragstart', () => {
         const literal = toLiteral(marker.position);
@@ -564,7 +618,31 @@ export default function MiniGridToolPage() {
               otherNode.lng()
             );
 
-            if (distance > 30) {
+            const isHighVoltage = line.get('strokeColor') === highVoltageColor;
+
+            const isPoleToPole =
+              isPole &&
+              miniGridNodes.some(
+                (n) =>
+                  Math.abs(n.lat - otherNode.lat()) < 1e-6 &&
+                  Math.abs(n.lng - otherNode.lng()) < 1e-6 &&
+                  n.type === 'pole'
+              );
+
+            let maxAllowedMeters: number;
+
+            if (isPoleToPole) {
+              maxAllowedMeters = isHighVoltage
+                ? highVoltagePoleToPoleLengthConstraint
+                : lowVoltagePoleToPoleLengthConstraint;
+            } else {
+              // Pole to Terminal (or Terminal to Pole)
+              maxAllowedMeters = isHighVoltage
+                ? highVoltagePoleToTerminalLengthConstraint
+                : lowVoltagePoleToTerminalLengthConstraint;
+            }
+
+            if (distance > maxAllowedMeters) {
               exceedsLimit = true;
             }
           }
@@ -710,40 +788,9 @@ export default function MiniGridToolPage() {
         markerDragRef.current = null;
       });
 
-      const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = '×';
-      // These coordinates are now relative to the 44x44 wrapper, not the icon size
-      deleteBtn.style.position = 'absolute';
-      deleteBtn.style.top = '0px';
-      deleteBtn.style.right = '0px';
-      deleteBtn.style.background = '#ef4444';
-      deleteBtn.style.color = 'white';
-      deleteBtn.style.border = 'none';
-      deleteBtn.style.borderRadius = '9999px';
-      deleteBtn.style.width = '10px';
-      deleteBtn.style.height = '10px';
-      deleteBtn.style.fontSize = '10px';
-      deleteBtn.style.lineHeight = '1';
-      deleteBtn.style.cursor = 'pointer';
-      deleteBtn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
-
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // We use window.confirm for a simple check
-        if (window.confirm(`Delete ${point.name}?`)) {
-          handleRemovePoint(point.name);
-        }
-      });
-
-      iconWrapper.appendChild(deleteBtn);
-
-      // 4. Assemble the final marker
-      content.appendChild(iconWrapper); // Wrapper first
-      content.appendChild(labelSpan); // Label second
-
       return marker;
     },
-    []
+    [handleRemovePoint] // ← Important: now depends on handleRemovePoint
   );
 
   const [sidebarWidth, setSidebarWidth] = useState(500); // default width
@@ -1705,6 +1752,18 @@ export default function MiniGridToolPage() {
           solver: selectedSolverName,
           params: paramValues,
           points: pointsToSend,
+          lengthConstraints: {
+            low: {
+              poleToPoleLengthConstraint: lowVoltagePoleToPoleLengthConstraint,
+              poleToHouseLengthConstraint:
+                lowVoltagePoleToTerminalLengthConstraint,
+            },
+            high: {
+              poleToPoleLengthConstraint: highVoltagePoleToPoleLengthConstraint,
+              poleToHouseLengthConstraint:
+                highVoltagePoleToTerminalLengthConstraint,
+            },
+          },
           costs: {
             poleCost: poleCost || 0,
             lowVoltageCostPerMeter: lowVoltageCost || 0,
@@ -2431,6 +2490,31 @@ export default function MiniGridToolPage() {
                       onLowVoltageCostChange={setLowVoltageCost}
                       onHighVoltageCostChange={setHighVoltageCost}
                       onRandomCosts={generateRandomCosts}
+                      // New length constraint props
+                      lowVoltagePoleToPoleLengthConstraint={
+                        lowVoltagePoleToPoleLengthConstraint
+                      }
+                      lowVoltagePoleToTerminalLengthConstraint={
+                        lowVoltagePoleToTerminalLengthConstraint
+                      }
+                      highVoltagePoleToPoleLengthConstraint={
+                        highVoltagePoleToPoleLengthConstraint
+                      }
+                      highVoltagePoleToTerminalLengthConstraint={
+                        highVoltagePoleToTerminalLengthConstraint
+                      }
+                      onLowVoltagePoleToPoleChange={
+                        setLowVoltagePoleToPoleLengthConstraint
+                      }
+                      onLowVoltagePoleToHouseChange={
+                        setLowVoltagePoleToTerminalLengthConstraint
+                      }
+                      onHighVoltagePoleToPoleChange={
+                        setHighVoltagePoleToPoleLengthConstraint
+                      }
+                      onHighVoltagePoleToHouseChange={
+                        setHighVoltagePoleToTerminalLengthConstraint
+                      }
                     />
 
                     <SolverConfiguration

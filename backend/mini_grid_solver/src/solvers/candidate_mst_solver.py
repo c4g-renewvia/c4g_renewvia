@@ -69,105 +69,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         # Remove near-duplicates (floating point)
         return np.unique(np.round(candidates_array, decimals=6), axis=0)
 
-    def split_long_edges_with_coords(
-            self,
-            graph: nx.DiGraph,
-            max_length_m: float = 30.0,
-    ) -> nx.DiGraph:
-        """
-        Break long edges (> max_length_m meters) into multiple shorter segments by
-        inserting new intermediate pole nodes directly into the graph.
-
-        Args:
-            graph: The current minimum spanning arborescence (directed graph)
-            max_length_m: Edges longer than this are fragmented (default: 30m)
-
-        Returns:
-            Updated graph with inserted intermediate nodes.
-        """
-        new_graph = graph.copy()
-
-        # Build node data lookup
-        node_data_by_index = {
-            n: data.copy()
-            for n, data in new_graph.nodes(data=True)
-        }
-
-        if not node_data_by_index:
-            return new_graph
-
-        next_index = max(node_data_by_index) + 1
-
-        for u, v, data in list(new_graph.edges(data=True)):
-            length_m = data.get("length", 0.0)
-            voltage = data.get("voltage", "unknown")
-
-            # Skip short edges
-            if length_m <= max_length_m + 0.01:   # small floating-point tolerance
-                continue
-
-            start_node = node_data_by_index[u]
-            end_node = node_data_by_index[v]
-
-            start_coord = np.array([start_node["lat"], start_node["lng"]], dtype=float)
-            end_coord = np.array([end_node["lat"], end_node["lng"]], dtype=float)
-
-            direction = end_coord - start_coord
-
-            # CORRECT way: use ceil so every segment <= max_length_m
-            num_segments = int(np.ceil(length_m / max_length_m))
-            segment_length = length_m / num_segments
-
-            # Remove the original long edge
-            new_graph.remove_edge(u, v)
-
-            prev_idx = u
-            for i in range(1, num_segments):
-                fraction = i / num_segments
-                current = start_coord + fraction * direction
-
-                # Add new intermediate pole
-                new_graph.add_node(
-                    next_index,
-                    lat=float(current[0]),
-                    lng=float(current[1]),
-                    type="pole",
-                    name=None,
-                    used=True,
-                )
-
-                node_data_by_index[next_index] = {
-                    "lat": float(current[0]),
-                    "lng": float(current[1]),
-                    "type": "pole",
-                    "name": None,
-                    "used": True,
-                }
-
-                new_graph.add_edge(
-                    prev_idx,
-                    next_index,
-                    length=segment_length,
-                    voltage=voltage,
-                    weight=self.calc_edge_weight(segment_length, voltage=voltage),
-                )
-
-                prev_idx = next_index
-                next_index += 1
-
-            # Final segment to original end node
-            new_graph.add_edge(
-                prev_idx,
-                v,
-                length=segment_length,
-                voltage=voltage,
-                weight=self.calc_edge_weight(segment_length, voltage=voltage),
-            )
-
-        # remove original edges
-        new_graph.graph.update(graph.graph)
-        return new_graph
-
     def fermat_torricelli_point(self, pts: np.ndarray) -> np.ndarray:
         """
         Compute approximate Fermat-Torricelli point for a triangle (3 points).
@@ -278,6 +179,6 @@ class CandidateMSTSolver(BaseMiniGridSolver):
         mst = self.prune_dead_end_pole_branches(arbo_graph)
 
         # 6. break long line segments
-        mst = self.split_long_edges_with_coords(graph=mst, max_length_m=30.0)
+        mst = self.split_long_edges_with_coords(graph=mst)
 
         return mst

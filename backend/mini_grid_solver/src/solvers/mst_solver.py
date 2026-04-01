@@ -22,7 +22,10 @@ class SimpleMSTSolver(BaseMiniGridSolver):
     - No fragmentation, no pruning, no extra poles
 
     Good as a baseline / lower bound reference.
+
+    Args: voltage: High or low voltage MST?
     """
+
 
     def _solve(self, input_tuple) -> Tuple[nx.DiGraph, List[Node]]:
 
@@ -55,7 +58,8 @@ class SimpleMSTSolver(BaseMiniGridSolver):
             for i in range(n):
                 for j in range(i + 1, n):
                     d = dist_matrix[i, j]
-                    weight = d * costs["lowVoltageCostPerMeter"]
+                    cost = costs.lowVoltageCostPerMeter if self.request.params.get("voltage", "low") == "low" else costs.highVoltageCostPerMeter
+                    weight = d * cost
                     G.edges[i, j]["weight"] = weight
                     G.edges[i, j]["length"] = d
                     G.edges[i, j]["voltage"] = "low"

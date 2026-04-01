@@ -1,9 +1,10 @@
 import pandas as pd
 import pytest
+from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY
+from mini_grid_solver.src.utils.models import *
 from pykml import parser
 
-from mini_grid_solver.src.solvers.registry import SOLVER_REGISTRY
-from mini_grid_solver.src.utils.models import SolverRequest
+from mini_grid_solver.src.utils.models import LengthConstraints, LengthConstraintsBase
 
 
 # ==================== FIXTURES ====================
@@ -45,11 +46,20 @@ def kml_points():
 @pytest.fixture
 def default_costs():
     """Standard cost parameters used in your main script."""
-    return {
-        "poleCost": 100.0,
-        "lowVoltageCostPerMeter": 10.0,
-        "highVoltageCostPerMeter": 40.0,
-    }
+    return Costs(
+        poleCost= 100.0,
+        lowVoltageCostPerMeter=10.0,
+        highVoltageCostPerMeter =40.0,
+    )
+
+
+@pytest.fixture
+def default_length_constraints():
+    """Standard cost parameters used in your main script."""
+    return LengthConstraints(low=LengthConstraintsBase(poleToPoleLengthConstraint=30,
+                                                       poleToTerminalLengthConstraint=20),
+                             high=LengthConstraintsBase(poleToPoleLengthConstraint=30,
+                                                        poleToTerminalLengthConstraint=30))
 
 
 @pytest.fixture
@@ -77,7 +87,7 @@ def test_registry_not_empty():
 
 
 @pytest.mark.parametrize("solver_name", SOLVER_REGISTRY.keys())
-def test_all_solvers_with_csv(solver_name, csv_points, default_costs):
+def test_all_solvers_with_csv(solver_name, csv_points, default_costs, default_length_constraints):
     """
     Parametrized test: Runs every solver in the registry using CSV data.
     Validates that each solver returns a result with nodes and edges.
@@ -88,6 +98,7 @@ def test_all_solvers_with_csv(solver_name, csv_points, default_costs):
     req = SolverRequest(
         points=csv_points,
         costs=default_costs,
+        lengthConstraints=default_length_constraints,
         debug=0,
     )
 
@@ -100,7 +111,7 @@ def test_all_solvers_with_csv(solver_name, csv_points, default_costs):
     assert result.totalCostEstimate > 0, f"{solver_name} calculated zero or negative cost"
 
 
-def test_steiner_solver_specific_logic(kml_points, default_costs):
+def test_steiner_solver_specific_logic(kml_points, default_costs, default_length_constraints):
     """Specific check for GreedyIterSteinerSolver using the KML dataset."""
     if "GreedyIterSteinerSolver" not in SOLVER_REGISTRY:
         pytest.skip("GreedyIterSteinerSolver not registered")
@@ -109,6 +120,7 @@ def test_steiner_solver_specific_logic(kml_points, default_costs):
     req = SolverRequest(
         points=kml_points,
         costs=default_costs,
+        lengthConstraints=default_length_constraints,
         debug=0,
     )
 
@@ -130,12 +142,13 @@ def test_solver_param_metadata():
 # ==================== ADDITIONAL TESTS ====================
 
 @pytest.mark.parametrize("solver_name", SOLVER_REGISTRY.keys())
-def test_solvers_with_ga_tech_data(solver_name, ga_tech_points, default_costs):
+def test_solvers_with_ga_tech_data(solver_name, ga_tech_points, default_costs, default_length_constraints):
     """Verifies that all solvers can handle the specific Georgia Tech coordinate set."""
     solver_class = SOLVER_REGISTRY[solver_name]
     req = SolverRequest(
         points=ga_tech_points,
         costs=default_costs,
+        lengthConstraints=default_length_constraints,
         debug=0,
     )
     result = solver_class(req).solve()
@@ -145,17 +158,21 @@ def test_solvers_with_ga_tech_data(solver_name, ga_tech_points, default_costs):
     assert result.totalCostEstimate > 0
 
 
-def test_cost_calculation_integrity(ga_tech_points, default_costs):
+def test_cost_calculation_integrity(ga_tech_points, default_costs, default_length_constraints):
     """
     Validates that the total cost accurately reflects the sum of its components.
     Formula: total_cost = (poleCount * poleCost) + lowWireCost + highWireCost
     """
     solver_class = SOLVER_REGISTRY["SimpleMSTSolver"]
-    req = SolverRequest(params={}, points=ga_tech_points, costs=default_costs)
+    req = SolverRequest(params={},
+                        points=ga_tech_points,
+                        costs=default_costs,
+                        lengthConstraints=default_length_constraints,
+                        debug=0, )
     result = solver_class(req).solve()
 
     expected_total = (
-            (result.numPolesUsed * default_costs["poleCost"]) +
+            (result.numPolesUsed * default_costs.poleCost) +
             result.lowWireCostEstimate +
             result.highWireCostEstimate
     )
@@ -164,12 +181,15 @@ def test_cost_calculation_integrity(ga_tech_points, default_costs):
     assert result.totalCostEstimate == pytest.approx(expected_total, rel=1e-2)
 
 
-def test_connectivity_spanning(ga_tech_points, default_costs):
+def test_connectivity_spanning(ga_tech_points, default_costs, default_length_constraints):
     """
     Ensures that every input node is present in the final graph.
     """
     solver_class = SOLVER_REGISTRY["SimpleMSTSolver"]
-    req = SolverRequest(params={}, points=ga_tech_points, costs=default_costs)
+    req = SolverRequest(params={},
+                        points=ga_tech_points,
+                        costs=default_costs,
+                        lengthConstraints=default_length_constraints,)
     result = solver_class(req).solve()
 
     input_names = {p["name"] for p in ga_tech_points if "source" not in p['name'].lower()}
@@ -179,13 +199,15 @@ def test_connectivity_spanning(ga_tech_points, default_costs):
     assert input_names.issubset(output_names)
 
 
-def test_steiner_point_injection(ga_tech_points, default_costs):
+def test_steiner_point_injection(ga_tech_points, default_costs, default_length_constraints):
     """
     Verifies that Steiner-based solvers (like GreedyNSteiner) successfully
     inject additional 'pole' type nodes into the network.
     """
     solver_class = SOLVER_REGISTRY["GreedyIterSteinerSolver"]
-    req = SolverRequest(points=ga_tech_points, costs=default_costs)
+    req = SolverRequest(points=ga_tech_points,
+                        costs=default_costs,
+                        lengthConstraints=default_length_constraints)
     result = solver_class(req).solve()
 
     # Check if any new 'pole' types were created beyond the original source/terminals

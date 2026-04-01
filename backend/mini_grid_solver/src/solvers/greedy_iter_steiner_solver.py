@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.cluster import KMeans
 
-from .candidate_mst_solver import CandidateMSTSolver, MAX_POLE_TO_POLE_LV
+from .candidate_mst_solver import CandidateMSTSolver
 from .registry import register_solver
 from ..utils.models import SolverRequest, Node
 
@@ -258,7 +258,7 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
                             cur_edges,
                             terminal_cluster_centers,
                             added_candidates,
-                            max_length=MAX_POLE_TO_POLE_LV, num_per_edge=2):
+                            num_per_edge=2):
 
         # remove candidates outside of terminal bounding box
         def mask_outside_terminal_bb(_coords, _cands):
@@ -289,9 +289,9 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
             candidates = np.concatenate([candidates, adaptive_fermat], axis=0)
 
         if cur_edges is not None:
+            # max_length = self.request.lengthConstraints.
             collinear_candidates = self.generate_collinear_candidates(np.array(coords),
                                                                       cur_edges,
-                                                                      max_length=max_length,
                                                                       num_per_edge=num_per_edge)
 
             # add terminal projections onto existing edges
@@ -307,14 +307,14 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
             collinear_candidates = np.empty((0, 2))
 
         # add projection candidates
-        if len(projection_candidates) > 0:
-            projection_candidates = mask_outside_terminal_bb(coords, projection_candidates)
-            candidates = np.concatenate([candidates, projection_candidates], axis=0)
+        # if len(projection_candidates) > 0:
+        #     projection_candidates = mask_outside_terminal_bb(coords, projection_candidates)
+        #     candidates = np.concatenate([candidates, projection_candidates], axis=0)
 
         # add collinear candidates
-        if len(collinear_candidates) > 0:
-            collinear_candidates = mask_outside_terminal_bb(coords, collinear_candidates)
-            candidates = np.concatenate([candidates, collinear_candidates], axis=0)
+        # if len(collinear_candidates) > 0:
+        #     collinear_candidates = mask_outside_terminal_bb(coords, collinear_candidates)
+        #     candidates = np.concatenate([candidates, collinear_candidates], axis=0)
 
         # add terminal cluster centers
         if len(terminal_cluster_centers) > 0:
@@ -454,7 +454,8 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
             # 2. Generate candidates (including Adaptive Fermat and Projections)
             candidates = self.generate_candidates(
                 current_coords, cur_edges, terminal_cluster_centers,
-                added_candidates, max_length=MAX_POLE_TO_POLE_LV, num_per_edge=3
+                added_candidates,
+                num_per_edge=3
             )
 
             if len(candidates) == 0:
@@ -566,7 +567,7 @@ class GreedyIterSteinerSolver(CandidateMSTSolver):
             print("--- Drop Phase Complete ---\n")
 
         # Final nodes + split
-        final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst, max_length_m=MAX_POLE_TO_POLE_LV)
+        final_mst = self.split_long_edges_with_coords(graph=best_pruned_mst)
 
         if self.request.debug >= 1:
             self._plot_current_tree(final_mst, added_points=None, title="Final Tree After Drop + Splitting")

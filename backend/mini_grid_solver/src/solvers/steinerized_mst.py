@@ -54,7 +54,7 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         super().__init__(request)
         self.max_edge_length = max_edge_length
 
-    def _solve(self, input_tuple) -> Tuple[nx.Graph]:
+    def _solve(self, input_tuple) -> nx.DiGraph:
         """
         Execute the full Steinerized MST algorithm and produce a SolverResult.
 
@@ -83,72 +83,15 @@ class SteinerizedMSTSolver(BaseMiniGridSolver):
         for i in range(n):
             for j in range(i + 1, n):
                 d = dist_matrix[i, j]
-                weight = d * costs["lowVoltageCostPerMeter"]
+                cost = (costs.lowVoltageCostPerMeter
+                            if self.request.params.get("voltage","low") == "low"
+                        else costs.highVoltageCostPerMeter)
+                weight = d * cost
                 G.edges[i, j]["weight"] = weight
                 G.edges[i, j]["length"] = d
                 G.edges[i, j]["voltage"] = "low"
         mst = nx.minimum_spanning_tree(G, weight="weight")
 
-        # ─── 6. Process each MST edge: steinerize if necessary ──────────────────
-        new_node_counter = n  # start numbering new poles from original n
-
-        for u, v, data in list(mst.edges(data=True)):  # use list() because we modify graph
-            orig_length = data["length"]
-            if orig_length <= self.max_edge_length:
-                continue  # no need to steinerize
-
-            p1 = (mst.nodes[u]["lat"], mst.nodes[u]["lng"])
-            p2 = (mst.nodes[v]["lat"], mst.nodes[v]["lng"])
-
-            # Get intermediate points (excluding endpoints)
-            intermediates = self._great_circle_intermediates(
-                p1[0], p1[1], p2[0], p2[1], self.max_edge_length
-            )
-
-            if not intermediates:
-                continue
-
-            # ─── Build chain: original u → new1 → new2 → ... → new_k → original v ───
-            prev = u
-
-            for lat, lon in intermediates:
-                # Create new node
-                new_id = new_node_counter
-                new_node_counter += 1
-
-                # Add to global lists
-                mst.add_node(new_id)
-                mst.nodes[new_id]["lat"] = lat
-                mst.nodes[new_id]["lng"] = lon
-                mst.nodes[new_id]["type"] = "pole"
-                mst.nodes[new_id]["name"] = "pole"
-                mst.nodes[new_id]["used"] = True
-
-                prev_node = mst.nodes(data=True)[prev]
-
-                # Connect previous → new
-                d = self.haversine_meters(prev_node['lat'], prev_node['lng'], lat, lon)
-                weight = self.calc_edge_weight(d, voltage="low")
-
-                mst.add_edge(prev, new_id,
-                             weight=weight,
-                             length=d,
-                             voltage="low")
-
-                prev = new_id
-
-            original_node = mst.nodes(data=True)[v]
-
-            # Final segment: last new node → original
-            d = self.haversine_meters(prev_node['lat'], prev_node['lng'], original_node['lat'], original_node['lng'])
-            weight = d * costs["lowVoltageCostPerMeter"]
-
-            mst.add_edge(prev, v,
-                         weight=weight,
-                         length=d,
-                         voltage="low")
-
-            # ─── Remove the original long edge ────────────────────────────────
-            mst.remove_edge(u, v)
+        mst = self.split_long_edges_with_coords(mst)
 
         return mst

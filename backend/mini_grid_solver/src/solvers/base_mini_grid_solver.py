@@ -19,8 +19,6 @@ MAX_POLE_TO_TERMINAL_LV = 30.0
 # MAX_POLE_TO_TERMINAL_HV = 50.0
 
 MIN_POLE_TO_POLE = 10.0
-MAX_POLE_TO_POLE_LV = 30.0
-# MAX_POLE_TO_POLE_HV = 50.0
 
 MAX_EDGE_DIST_PENALTY = 10000
 
@@ -155,7 +153,7 @@ class BaseMiniGridSolver(ABC):
         """
 
         points = request.points
-        costs = request.costs.copy()  # defensive copy
+        costs : Costs = request.costs.model_copy()  # defensive copy
 
         if len(points) < 2:
             raise ValueError("At least 2 points required")
@@ -357,7 +355,8 @@ class BaseMiniGridSolver(ABC):
         # 1. Parse input and input into abstract solver method
         graph = self._solve(self.parse_and_validate_input(poles=True))
 
-        graph = self._post_solver_local_opt(graph)
+        # 2. Gradient Decent each pole placement to ensure not local optimization is left on the table
+        # graph = self._post_solver_local_opt(graph)
 
         return self.build_solver_result(graph)
 
@@ -426,12 +425,6 @@ class BaseMiniGridSolver(ABC):
         if len(self._coords) < 2:
             raise ValueError("Need at least source + 1 terminal")
 
-        self._costs = self._costs or {}
-        # Ensure default solver exist (subclasses can still override/ignore)
-        self._costs.setdefault("poleCost", 100.0)
-        self._costs.setdefault("lowVoltageCostPerMeter", 10.0)
-        self._costs.setdefault("highVoltageCostPerMeter", 20.0)
-
         self._nodes = self._build_nodes(self._coords, [], self._names)
 
         return self._nodes, self._coords, self._source_idx, self._terminal_indices, self._names, self._costs
@@ -447,27 +440,67 @@ class BaseMiniGridSolver(ABC):
         Returns:
 
         """
-        low_voltage_cost = self.request.costs.get(f"{voltage}VoltageCostPerMeter", 10.0)
-        pole_cost = self.request.costs.get("poleCost", 10.0)
+        low_voltage_cost = (self.request.costs.lowVoltageCostPerMeter 
+                            if voltage == "low" 
+                                else self.request.costs.highVoltageCostPerMeter)
+        
+        pole_cost = self.request.costs.poleCost
 
         # Cost of the wire
         weight = length * low_voltage_cost
 
         # Cost of intermediate support poles for long spans
-        extra_poles = max(0, math.ceil(length / MAX_POLE_TO_POLE_LV) - 1)
+        pole_to_pole_cost = (self.request.lengthConstraints.low.poleToPoleLengthConstraint
+                              if voltage == "low"
+                              else self.request.lengthConstraints.high.poleToPoleLengthConstraint)
+        extra_poles = max(0, math.ceil(length / pole_to_pole_cost) - 1)
         weight += extra_poles * pole_cost
 
         return weight
 
     def _compute_total_cost(self, graph):
-        # 1. Wire and span-pole costs
+        """
+        Compute total cost (wire + poles) + HUGE penalty if any edge violates
+        the length constraints from self.request.lengthConstraints.
+
+        This guarantees that local gradient descent (and any other optimizer)
+        will NEVER accept a pole position that makes any edge too long.
+        """
+        # 1. Wire + intermediate support-pole costs (already computed in edge weights)
         wire_cost = sum(d['weight'] for u, v, d in graph.edges(data=True))
 
-        # 2. Unique node costs
+        # 2. Pole costs
         num_poles = sum(1 for idx, data in graph.nodes(data=True) if data['type'] == "pole")
-        pole_cost = self._costs.get("poleCost", 100.0)
+        pole_cost = self._costs.poleCost
 
-        return wire_cost + (num_poles * pole_cost)
+        total = wire_cost + (num_poles * pole_cost)
+
+        # 3. Constraint violation penalty (prevents any illegal move)
+        violation_penalty = 0.0
+        for u, v, data in graph.edges(data=True):
+            length = data.get("length", 0.0)
+            voltage = data.get("voltage", "low")
+
+            u_type = graph.nodes[u]['type']
+            v_type = graph.nodes[v]['type']
+
+            # Same logic as split_long_edges_with_coords + calc_edge_weight
+            if u_type == "terminal" or v_type == "terminal":
+                # service drop (pole ↔ terminal or source ↔ terminal)
+                max_len = (self.request.lengthConstraints.low.poleToTerminalLengthConstraint
+                           if voltage == "low"
+                           else self.request.lengthConstraints.high.poleToTerminalLengthConstraint)
+            else:
+                # trunk / pole-pole / source-pole
+                max_len = (self.request.lengthConstraints.low.poleToPoleLengthConstraint
+                           if voltage == "low"
+                           else self.request.lengthConstraints.high.poleToPoleLengthConstraint)
+
+            if length > max_len + 1e-4:  # tiny floating-point tolerance
+                excess = length - max_len
+                violation_penalty += MAX_EDGE_DIST_PENALTY * excess   # 10000 × meters over
+
+        return total + violation_penalty
 
     def build_directed_graph_for_arborescence(self, nodes) -> nx.DiGraph:
         """
@@ -616,7 +649,182 @@ class BaseMiniGridSolver(ABC):
                         removed = True
         return DG
 
+    def _all_edges_valid(self, graph, node_idx: int) -> bool:
+        """Check that all edges connected to this pole respect lengthConstraints."""
+        for u, v, data in graph.edges(node_idx, data=True):
+            length = data.get('length', 0.0)
+            voltage = data.get('voltage', 'low')
+
+            # Determine max allowed length
+            if graph.nodes[u].get('type') == 'terminal' or graph.nodes[v].get('type') == 'terminal':
+                max_len = (self.request.lengthConstraints.low.poleToTerminalLengthConstraint
+                           if voltage == 'low' else
+                           self.request.lengthConstraints.high.poleToTerminalLengthConstraint)
+            else:
+                max_len = (self.request.lengthConstraints.low.poleToPoleLengthConstraint
+                           if voltage == 'low' else
+                           self.request.lengthConstraints.high.poleToPoleLengthConstraint)
+
+            if length > max_len + 0.01:   # small tolerance
+                return False
+        return True
+
+    def _respects_min_separation(self, graph, node_idx: int, min_m: float = 5.0) -> bool:
+        """Optional: prevent poles from getting too close to each other or terminals."""
+        pole_lat = graph.nodes[node_idx]['lat']
+        pole_lng = graph.nodes[node_idx]['lng']
+
+        for other_idx, data in graph.nodes(data=True):
+            if other_idx == node_idx:
+                continue
+            if data.get('type') in ('pole', 'terminal', 'source'):
+                d = self.haversine_meters(
+                    pole_lat, pole_lng,
+                    data['lat'], data['lng']
+                )
+                if d < min_m - 0.1:
+                    return False
+        return True
+
     def _post_solver_local_opt(self, graph: Union[nx.Graph, nx.DiGraph]):
+        """
+        Local gradient descent on each pole to minimize total cost,
+        while strictly respecting lengthConstraints (pole-to-pole and pole-to-terminal).
+        """
+        if len([n for n, d in graph.nodes(data=True) if d.get('type') == 'pole']) == 0:
+            return graph  # nothing to optimize
+
+        graph = graph.copy()
+
+        one_meter_deg = 1.0 / 111111.0
+        max_step_meters = 5.0  # keep movements very local
+        max_iterations = 25
+        grad_eps_m = 0.5  # finite difference step
+        eps_deg = grad_eps_m * one_meter_deg
+
+        min_separation_m = 5.0  # optional: prevent poles from getting too close
+
+        print(f"Starting constrained local gradient descent. Initial cost: {self._compute_total_cost(graph):.2f}")
+
+        improved = False
+
+        for node_idx, node_data in list(graph.nodes(data=True)):
+            if node_data.get('type') != "pole":
+                continue
+
+            print(f"Optimizing pole {node_idx} ({node_data.get('name', 'Pole')})...")
+
+            current_cost = self._compute_total_cost(graph)
+
+            for iteration in range(max_iterations):
+                lat, lng = graph.nodes[node_idx]['lat'], graph.nodes[node_idx]['lng']
+
+                # === Compute numerical gradient ===
+                # +lat
+                graph.nodes[node_idx]['lat'] = lat + eps_deg
+                graph.nodes[node_idx]['lng'] = lng
+                self._recompute_edges_for_node(graph, node_idx)
+                cost_p_lat = self._compute_total_cost(graph) if self._all_edges_valid(graph, node_idx) else 1e9
+
+                # -lat
+                graph.nodes[node_idx]['lat'] = lat - eps_deg
+                self._recompute_edges_for_node(graph, node_idx)
+                cost_m_lat = self._compute_total_cost(graph) if self._all_edges_valid(graph, node_idx) else 1e9
+
+                # +lng
+                graph.nodes[node_idx]['lat'] = lat
+                graph.nodes[node_idx]['lng'] = lng + eps_deg
+                self._recompute_edges_for_node(graph, node_idx)
+                cost_p_lng = self._compute_total_cost(graph) if self._all_edges_valid(graph, node_idx) else 1e9
+
+                # -lng
+                graph.nodes[node_idx]['lat'] = lat
+                graph.nodes[node_idx]['lng'] = lng - eps_deg
+                self._recompute_edges_for_node(graph, node_idx)
+                cost_m_lng = self._compute_total_cost(graph) if self._all_edges_valid(graph, node_idx) else 1e9
+
+                # Restore
+                graph.nodes[node_idx]['lat'] = lat
+                graph.nodes[node_idx]['lng'] = lng
+                self._recompute_edges_for_node(graph, node_idx)
+
+                grad_lat = (cost_p_lat - cost_m_lat) / (2 * eps_deg)
+                grad_lng = (cost_p_lng - cost_m_lng) / (2 * eps_deg)
+
+                grad_norm = math.sqrt(grad_lat ** 2 + grad_lng ** 2)
+
+                if grad_norm < 1e-3:  # practically flat
+                    if self.request.debug:
+                        print(f"  Pole {node_idx}: gradient near zero")
+                    break
+
+                # Direction of descent
+                step_lat = -grad_lat / grad_norm * max_step_meters * one_meter_deg
+                step_lng = -grad_lng / grad_norm * max_step_meters * one_meter_deg
+
+                # === Backtracking line search with constraint checking ===
+                best_step_lat = 0.0
+                best_step_lng = 0.0
+                best_new_cost = current_cost
+
+                for scale in [1.0, 0.5, 0.25, 0.125, 0.0625]:
+                    test_lat = lat + scale * step_lat
+                    test_lng = lng + scale * step_lng
+
+                    # Temporarily apply
+                    graph.nodes[node_idx]['lat'] = test_lat
+                    graph.nodes[node_idx]['lng'] = test_lng
+                    self._recompute_edges_for_node(graph, node_idx)
+
+                    if self._all_edges_valid(graph, node_idx):
+
+                        new_cost = self._compute_total_cost(graph)
+                        if new_cost < best_new_cost:
+                            best_new_cost = new_cost
+                            best_step_lat = scale * step_lat
+                            best_step_lng = scale * step_lng
+
+                # Apply best valid step
+                if best_step_lat != 0.0 or best_step_lng != 0.0:
+                    graph.nodes[node_idx]['lat'] = lat + best_step_lat
+                    graph.nodes[node_idx]['lng'] = lng + best_step_lng
+                    self._recompute_edges_for_node(graph, node_idx)
+
+                    improvement = current_cost - best_new_cost
+                    current_cost = best_new_cost
+                    improved = True
+
+                    move_m = math.hypot(best_step_lat / one_meter_deg, best_step_lng / one_meter_deg)
+                    if self.request.debug or improvement > 0.05:
+                        print(f"  Iter {iteration + 1:2d}: moved {move_m:.1f}m, Δcost = -{improvement:.2f}")
+                else:
+                    if self.request.debug:
+                        print(f"  Iter {iteration + 1:2d}: no valid improving step")
+                    break
+
+        final_cost = self._compute_total_cost(graph)
+        delta = self._compute_total_cost(graph) - final_cost  # should be near zero
+        print(f"Local GD finished. Final cost: {final_cost:.2f} "
+              f"({'improved' if improved else 'no significant change'})")
+
+        return graph
+
+    def _recompute_edges_for_node(self, graph, node_idx: int):
+        """Recompute length and weight for all edges connected to a node after moving it."""
+        for u, v in list(graph.edges(node_idx)):
+            # u or v is node_idx
+            lat1, lng1 = graph.nodes[u]['lat'], graph.nodes[u]['lng']
+            lat2, lng2 = graph.nodes[v]['lat'], graph.nodes[v]['lng']
+
+            length = self.haversine_meters(lat1, lng1, lat2, lng2)
+
+            graph[u][v]['length'] = length
+            graph[u][v]['weight'] = self.calc_edge_weight(
+                length,
+                graph[u][v].get('voltage', 'low')
+            )
+
+    def _post_solver_local_opt_brute_force(self, graph: Union[nx.Graph, nx.DiGraph]):
         """
         Optional local optimization step after the initial solve.
 
@@ -712,6 +920,119 @@ class BaseMiniGridSolver(ABC):
 
         return n_poles, low_m, high_m
 
+    def split_long_edges_with_coords( self, graph: Union[nx.Graph, nx.DiGraph]) -> nx.DiGraph:
+        """
+        Break long edges (> max_length_m meters) into multiple shorter segments by
+        inserting new intermediate pole nodes directly into the graph.
+
+        Args:
+            graph: The current minimum spanning arborescence (directed graph)
+
+        Returns:
+            Updated graph with inserted intermediate nodes.
+        """
+        new_graph = graph.copy()
+
+        # Build node data lookup
+        node_data_by_index = {
+            n: data.copy()
+            for n, data in new_graph.nodes(data=True)
+        }
+
+        if not node_data_by_index:
+            return new_graph
+
+        next_index = max(node_data_by_index) + 1
+
+        for u, v, data in list(new_graph.edges(data=True)):
+
+            u_type = new_graph.nodes[u]['type']
+            v_type = new_graph.nodes[v]['type']
+
+            length_m = data.get("length", 0.0)
+            voltage = data.get("voltage", "unknown")
+
+            # Default max length
+            max_length_m = 30.0
+
+            if u_type == "terminal" or v_type == "terminal":
+                if voltage == "low":
+                    max_length_m = self.request.lengthConstraints.low.poleToTerminalLengthConstraint
+                if voltage == "high":
+                    max_length_m = self.request.lengthConstraints.high.poleToTerminalLengthConstraint
+            else:
+                if voltage == "low":
+                    max_length_m = self.request.lengthConstraints.low.poleToPoleLengthConstraint
+                if voltage == "high":
+                    max_length_m = self.request.lengthConstraints.high.poleToPoleLengthConstraint
+
+
+            # Skip short edges
+            if length_m <= max_length_m + 0.01:   # small floating-point tolerance
+                continue
+
+            start_node = node_data_by_index[u]
+            end_node = node_data_by_index[v]
+
+            start_coord = np.array([start_node["lat"], start_node["lng"]], dtype=float)
+            end_coord = np.array([end_node["lat"], end_node["lng"]], dtype=float)
+
+            direction = end_coord - start_coord
+
+            # CORRECT way: use ceil so every segment <= max_length_m
+            num_segments = int(np.ceil(length_m / max_length_m))
+            segment_length = length_m / num_segments
+
+            # Remove the original long edge
+            new_graph.remove_edge(u, v)
+
+            prev_idx = u
+            for i in range(1, num_segments):
+                fraction = i / num_segments
+                current = start_coord + fraction * direction
+
+                # Add new intermediate pole
+                new_graph.add_node(
+                    next_index,
+                    lat=float(current[0]),
+                    lng=float(current[1]),
+                    type="pole",
+                    name=None,
+                    used=True,
+                )
+
+                node_data_by_index[next_index] = {
+                    "lat": float(current[0]),
+                    "lng": float(current[1]),
+                    "type": "pole",
+                    "name": None,
+                    "used": True,
+                }
+
+                new_graph.add_edge(
+                    prev_idx,
+                    next_index,
+                    length=segment_length,
+                    voltage=voltage,
+                    weight=self.calc_edge_weight(segment_length, voltage=voltage),
+                )
+
+                prev_idx = next_index
+                next_index += 1
+
+            # Final segment to original end node
+            new_graph.add_edge(
+                prev_idx,
+                v,
+                length=segment_length,
+                voltage=voltage,
+                weight=self.calc_edge_weight(segment_length, voltage=voltage),
+            )
+
+        # remove original edges
+        new_graph.graph.update(graph.graph)
+        return new_graph
+
     def build_solver_result(self, graph: Union[nx.DiGraph, nx.Graph],
                             debug_info: Optional[Dict[str, Any]] = None) -> SolverResult:
         """
@@ -737,9 +1058,9 @@ class BaseMiniGridSolver(ABC):
         # 3. Build edges + lengths
         num_poles, total_low_m, total_high_m = self._get_num_poles_and_wire_length(graph)
 
-        pole_cost = self._costs.get("poleCost", 100.0)
-        low_cost_m = self._costs.get("lowVoltageCostPerMeter", 10.0)
-        high_cost_m = self._costs.get("highVoltageCostPerMeter", 20.0)
+        pole_cost = self._costs.poleCost
+        low_cost_m = self._costs.lowVoltageCostPerMeter
+        high_cost_m = self._costs.highVoltageCostPerMeter
 
         low_wire_cost = total_low_m * low_cost_m
         high_wire_cost = total_high_m * high_cost_m

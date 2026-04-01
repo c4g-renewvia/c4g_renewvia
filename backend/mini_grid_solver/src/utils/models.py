@@ -3,6 +3,22 @@ from typing import Union
 
 from pydantic import BaseModel, Field, ConfigDict
 
+poleToTerminalLengthConstraint: float
+
+class LengthConstraintsBase(BaseModel):
+    poleToPoleLengthConstraint: float = 30.0
+    poleToTerminalLengthConstraint: float = 20.0
+
+class LengthConstraints(BaseModel):
+    low: LengthConstraintsBase
+    high: LengthConstraintsBase
+
+
+class Costs(BaseModel):
+    poleCost: float = 1000.0
+    lowVoltageCostPerMeter: float = 30.0
+    highVoltageCostPerMeter: float = 50.0
+
 
 class SolverRequest(BaseModel):
     """Pydantic model for incoming optimization request from frontend.
@@ -10,13 +26,16 @@ class SolverRequest(BaseModel):
     Args:
         points: List of dicts with 'lat', 'lng', and optional 'name'.
         costs: Dict with poleCost, lowVoltageCostPerMeter, highVoltageCostPerMeter.
+        lengthConstraints: {'low':
         debug: Optional flag to enable debug output.
     """
     solver: str = "SimpleMSTSolver"
     params: Dict[str, Any] = {}
     points: List[Dict[str, Union[float, str, None]]]
-    costs: Dict[str, float]
+    lengthConstraints: LengthConstraints
+    costs: Costs
     debug: int = 0
+
 
 
 class Solver(BaseModel):

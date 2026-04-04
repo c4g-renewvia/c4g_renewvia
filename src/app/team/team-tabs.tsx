@@ -39,7 +39,8 @@ export function TeamTabs() {
 
         {/* Detached Optimization Tool Button */}
         <Link
-          href='/minigrid-tool'
+          target='_blank'
+          href='https://mini-grid-optimization-tool.vercel.app/'
           className={`inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition-all hover:bg-emerald-400 hover:shadow-md hover:shadow-emerald-500/40 focus:ring-2 focus:ring-emerald-400/50 focus:outline-none active:scale-[0.985] ${
             isToolPage ? 'ring-2 ring-emerald-400/50' : ''
           }`}
@@ -69,7 +70,8 @@ export function TeamTabs() {
 
         {/* Detached Optimization Tool Button - Mobile */}
         <Link
-          href='/minigrid-tool'
+          target='_blank'
+          href='https://mini-grid-optimization-tool.vercel.app/'
           className={`flex w-full items-center justify-center rounded-xl bg-emerald-500 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition-all hover:bg-emerald-400 hover:shadow-md hover:shadow-emerald-500/40 focus:ring-2 focus:ring-emerald-400/50 focus:outline-none active:scale-[0.985] ${
             isToolPage ? 'ring-2 ring-emerald-400/50' : ''
           }`}

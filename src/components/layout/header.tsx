@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { Menu, X } from 'lucide-react'; // ← Install lucide-react if you don't have it
-import { UserMenu } from './user-menu';
 import { TeamTabs } from '@/app/team/team-tabs';
 
 export function Header() {
@@ -45,8 +44,6 @@ export function Header() {
 
         {/* Right Side: User Menu + Hamburger */}
         <div className='flex items-center gap-3'>
-          <UserMenu />
-
           {/* Hamburger Button - Visible only on mobile */}
           <button
             onClick={toggleMobileMenu}

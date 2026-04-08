@@ -11,6 +11,7 @@ const tabs = [
   { name: 'Lighthouse Report', href: '/team/lighthouse-report' },
   { name: 'Presentation Slides', href: '/team/presentation-slides' },
   { name: 'Demo', href: '/team/demo' },
+  { name: 'Final Presentation', href: '/team/final-presentation' },
 ];
 
 export function TeamTabs() {

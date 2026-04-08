@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Demo • Renewvia',
-  description: 'Project Demo Video – CS 6150 Computing For Good',
+  description: 'Project Final Presentation – CS 6150 Computing For Good',
   icons: { icon: '/favicon.ico' },
 };
 
@@ -21,7 +21,7 @@ export default function ProjectDemoPage() {
           </div>
 
           <h1 className='mb-6 text-6xl font-bold tracking-tighter md:text-7xl lg:text-8xl'>
-            Project Demo
+            Project Final Presentation
           </h1>
           <p className='mb-10 text-3xl font-light text-emerald-100 md:text-4xl lg:text-5xl'>
             Solar Mini-Grid Powerline Distribution Networks
@@ -33,7 +33,7 @@ export default function ProjectDemoPage() {
       <section className='mx-auto max-w-6xl border-t border-zinc-200 px-6 py-20 md:py-28 dark:border-zinc-800'>
         <div className='mb-12 text-center'>
           <h2 className='text-5xl font-bold tracking-tight text-emerald-600 md:text-6xl dark:text-emerald-400'>
-            Spring 2026 Demo
+            Spring 2026 Final Presentation
           </h2>
         </div>
 
@@ -42,10 +42,10 @@ export default function ProjectDemoPage() {
             {' '}
             {/* 16:9 aspect ratio */}
             <iframe
-              src='https://drive.google.com/file/d/1fgy8RvdnKWG-CWk9j4wBESL_BYO3leUz/preview'
+              src=''
               allow='autoplay'
               className='absolute inset-0 h-full w-full'
-              title='Spring 2026 Renewvia Project Video'
+              title='Spring 2026 Renewvia Project Final Presentation'
               allowFullScreen
             />
           </div>
@@ -54,7 +54,10 @@ export default function ProjectDemoPage() {
 
       {/* Footer */}
       <footer className='border-t border-zinc-200 bg-white py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400'>
-        <p>© 2026 • CS 6150 Computing For Good • Renewvia Project Demo</p>
+        <p>
+          © 2026 • CS 6150 Computing For Good • Renewvia Project Final
+          Presentation
+        </p>
       </footer>
     </div>
   );

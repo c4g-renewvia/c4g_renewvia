@@ -42,7 +42,7 @@ export default function ProjectDemoPage() {
             {' '}
             {/* 16:9 aspect ratio */}
             <iframe
-              src=''
+              src='https://drive.google.com/file/d/1k7b9xSccE5ZLYo3gzQqY1TNR17Inq8Hf/preview'
               allow='autoplay'
               className='absolute inset-0 h-full w-full'
               title='Spring 2026 Renewvia Project Final Presentation'

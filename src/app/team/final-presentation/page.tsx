@@ -1,12 +1,12 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Demo • Renewvia',
+  title: 'Final Presentation • Renewvia',
   description: 'Project Final Presentation – CS 6150 Computing For Good',
   icons: { icon: '/favicon.ico' },
 };
 
-export default function ProjectDemoPage() {
+export default function ProjectFinalPresentationPage() {
   return (
     <div className='min-h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-white'>
       {/* Hero Header – consistent style across the site */}

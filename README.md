@@ -68,14 +68,6 @@ You can start editing the page by modifying `src/app/page.tsx`. The page auto-up
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Manual Updates after cloning the template (by C4G staff)
-
-1. Replace `template` in many files to your project name.
-2. Setup oauth settings in [GCP](https://console.cloud.google.com/apis/credentials?project=c4g-template)
-3. Setup nginx configuration, and re-run SSL cert on [C4G Server](https://c4g.dev).
-4. Generate VAPID keys for PWA setup [Generator](https://vapidkeys.com/)
-5. Generate RESEND key [Resend](https://resend.com/emails)
-
 ## Running the Tool Locally (Applies to the [Mini-Grid Optimization Tool](https://github.com/c4g-renewvia/mini-grid-optimization-tool))
 
 ### Requirements
@@ -137,5 +129,3 @@ make
 - [Next-Auth](https://authjs.dev/) - authentication with google
 - [Ag-Grid](https://www.ag-grid.com/) - grid / table component
 - [Resend](https://resend.com) - emails
-
-If you want to contribute to this template for future projects please work with the teaching staff. We welcome any technologies that could benefit the partners and speed to delivery for features.
